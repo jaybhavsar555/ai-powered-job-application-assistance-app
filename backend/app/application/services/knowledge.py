@@ -31,7 +31,13 @@ class KnowledgeBaseService:
         # Preserve search-rank order
         return [by_id[i] for i in entity_ids if i in by_id]
 
-    async def create(self, user_id: UUID, data: WikiEntityCreate) -> DBWikiEntity:
+    async def create(
+        self,
+        user_id: UUID,
+        data: WikiEntityCreate,
+        *,
+        index_vectors: bool = True,
+    ) -> DBWikiEntity:
         entity = DBWikiEntity(
             user_id=user_id,
             entity_type=data.entity_type,
@@ -42,23 +48,26 @@ class KnowledgeBaseService:
         self.db.add(entity)
         await self.db.flush()
 
-        # Index into Qdrant for semantic retrieval
-        try:
-            vector_id = data.vector_id or new_vector_id()
-            text = entity_to_embed_text(data.title, data.entity_type, data.content or {})
-            vector = await embed_text(text)
-            get_vector_memory().upsert_entity(
-                vector_id=vector_id,
-                user_id=user_id,
-                entity_id=entity.id,
-                entity_type=data.entity_type,
-                title=data.title,
-                vector=vector,
-            )
-            entity.vector_id = vector_id
-        except Exception:
-            # Vault create should succeed even if Qdrant is temporarily down
-            pass
+        # Index into Qdrant for semantic retrieval (optional; never block Vault writes)
+        if index_vectors:
+            try:
+                import asyncio
+
+                vector_id = data.vector_id or new_vector_id()
+                text = entity_to_embed_text(data.title, data.entity_type, data.content or {})
+                vector = await asyncio.wait_for(embed_text(text), timeout=8.0)
+                get_vector_memory().upsert_entity(
+                    vector_id=vector_id,
+                    user_id=user_id,
+                    entity_id=entity.id,
+                    entity_type=data.entity_type,
+                    title=data.title,
+                    vector=vector,
+                )
+                entity.vector_id = vector_id
+            except Exception:
+                # Vault create should succeed even if Qdrant/embeddings are down or slow
+                pass
 
         await self.db.commit()
         await self.db.refresh(entity)
@@ -167,6 +176,7 @@ class KnowledgeBaseService:
                         "category": "job_board",
                     },
                 ),
+                index_vectors=False,
             )
             existing_urls.add(key)
             created += 1
@@ -204,6 +214,7 @@ class KnowledgeBaseService:
                         "note": "Used to pick a base resume from RESUME_SOURCE_DIR when generating an apply package.",
                     },
                 ),
+                index_vectors=False,
             )
             created += 1
         return created
