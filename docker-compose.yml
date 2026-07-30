@@ -28,23 +28,28 @@ services:
   # Pull a model after first start:
   #   docker compose exec ollama ollama pull qwen2.5:3b
   #   docker compose exec ollama ollama pull nomic-embed-text
-  # Stronger options: qwen2.5:7b, qwen2.5:14b, llama3.1:8b
-  # Match LLM_MODEL in backend/.env and restart uvicorn after changing.
+  # Prefer qwen2.5:3b on 4GB GPUs (e.g. GTX 1650 Ti). 7b often spills to CPU.
   ollama:
     image: ollama/ollama:latest
     ports:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    environment:
+      # Keep the active model resident between agent calls (avoids ~8s reload each time)
+      OLLAMA_KEEP_ALIVE: "-1"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    # Docker Desktop + NVIDIA Container Toolkit
+    gpus: all
     restart: unless-stopped
-    # Uncomment below if you have an NVIDIA GPU + NVIDIA Container Toolkit:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
 volumes:
   postgres_data:

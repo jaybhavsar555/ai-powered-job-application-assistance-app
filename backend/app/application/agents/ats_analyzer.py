@@ -1,6 +1,5 @@
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
-import asyncio
 
 from app.application.agents.base import OSAgent
 from app.application.agents.registry import agent_registry
@@ -31,12 +30,17 @@ class ATSAnalyzerAgent(OSAgent):
         job_description = state.get("job_description", "")
         system_prompt = prompt_registry.get_prompt(self.name)
 
-        await asyncio.sleep(0.3)
         result = await structured_generate(
             ATSAnalysisResult,
             [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Resume:\n{resume_content}\n\nJob Description:\n{job_description}"},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Resume:\n{(resume_content or '')[:1200]}\n\n"
+                        f"Job Description:\n{(job_description or '')[:1800]}"
+                    ),
+                },
             ],
             fallback=self._mock,
         )

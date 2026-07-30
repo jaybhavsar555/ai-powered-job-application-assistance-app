@@ -38,6 +38,9 @@ export function getApiErrorMessage(err: unknown, fallback = 'Request failed'): s
   if (anyErr.response?.status === 401 || anyErr.response?.status === 403) {
     return 'Not authenticated — refreshing demo session…';
   }
+  if (anyErr.response?.status && anyErr.response.status >= 500) {
+    return `API error ${anyErr.response.status} — check backend logs on :8001`;
+  }
   if (anyErr.message === 'Network Error' || anyErr.code === 'ERR_NETWORK') {
     return 'Cannot reach API (is the backend running on :8001?)';
   }

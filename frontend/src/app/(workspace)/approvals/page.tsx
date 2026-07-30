@@ -229,14 +229,15 @@ export default function ApprovalsPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-6 max-w-4xl">
+      <div className="grid grid-cols-1 gap-6 max-w-3xl">
         {coverLetter && (
           <ApprovalCard
             title="Generated Cover Letter"
-            originalText="[No existing cover letter — showing newly generated draft.]"
+            originalText=""
             proposedText={coverLetter}
             evidence="Hooks from company research (funding, stack) woven into an opening that maps to the JD."
             status={statuses.cover_letter}
+            isNewDraft
             onApprove={() => decide("cover_letter", "approve")}
             onReject={() => decide("cover_letter", "reject")}
           />
@@ -245,10 +246,11 @@ export default function ApprovalsPage() {
         {hasResume && (
           <ApprovalCard
             title="Resume Optimization"
-            originalText="[Base resume before ATS keyword weave]"
+            originalText="Base resume before ATS keyword weave"
             proposedText={resumeProposed}
             evidence="ATS Analyzer missing skills injected into summary/bullets without fabricating experience."
             status={statuses.resume}
+            isNewDraft
             onApprove={() => decide("resume", "approve")}
             onReject={() => decide("resume", "reject")}
           />

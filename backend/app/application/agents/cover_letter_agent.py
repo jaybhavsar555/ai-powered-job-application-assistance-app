@@ -1,15 +1,28 @@
 from pydantic import BaseModel, Field
-from typing import Dict, Any
-import asyncio
+from typing import Any, Dict
+import json
 
 from app.application.agents.base import OSAgent
 from app.application.agents.registry import agent_registry
 from app.core.prompts.registry import prompt_registry
 from app.infrastructure.llm.client import structured_generate
 
+
+def _as_prompt_text(value: Any, limit: int = 1500) -> str:
+    """Coerce dict/list/str payloads into a truncated prompt string."""
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    else:
+        text = str(value)
+    return text[:limit]
+
+
 class CoverLetter(BaseModel):
     content: str = Field(..., description="The full, professional cover letter text, properly formatted with paragraphs")
     hooks_used: list[str] = Field(..., description="The specific pain points or company research used as hooks in the introduction")
+
 
 class CoverLetterAgent(OSAgent):
     name = "cover_letter_agent"
@@ -28,15 +41,23 @@ class CoverLetterAgent(OSAgent):
         company_research = state.get("company_research", "No research found.")
         system_prompt = prompt_registry.get_prompt(self.name)
 
-        await asyncio.sleep(0.3)
         result = await structured_generate(
             CoverLetter,
             [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Resume:\n{optimized_resume}\n\nJob Details:\n{job_details}\n\nCompany Research:\n{company_research}"},
+                {
+                    "role": "user",
+                    "content": (
+                        "Write a concise cover letter (max ~180 words, 3 short paragraphs).\n\n"
+                        f"Resume:\n{_as_prompt_text(optimized_resume)}\n\n"
+                        f"Job Details:\n{_as_prompt_text(job_details)}\n\n"
+                        f"Company Research:\n{_as_prompt_text(company_research)}"
+                    ),
+                },
             ],
             fallback=self._mock,
         )
         return {"cover_letter": result.model_dump()}
+
 
 agent_registry.register(CoverLetterAgent())

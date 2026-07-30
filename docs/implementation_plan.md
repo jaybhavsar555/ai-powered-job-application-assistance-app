@@ -44,6 +44,20 @@ Living status for Career OS. **Phases 0–17 are complete.** See [walkthrough.md
 - [ ] Kubernetes manifests / Helm
 - [ ] Paid marketplace / signed plugin packages
 
+### Product layer (not started) — Simple Mode / Career Inbox
+
+The agent workspace (Phases 0–17) is the **Advanced Workspace**. The daily job-seeker product is a **second layer on top** — do not remove Canvas/Vault/Tracker.
+
+Full gap analysis + phased plan: **[product_simple_mode_roadmap.md](./product_simple_mode_roadmap.md)**
+
+- [ ] **Phase 18** — Shell modes + Career Inbox (`/inbox`, `GET /inbox/summary`)
+- [ ] **Phase 19** — Jobs page (import + cards; optional auto-Simulate)
+- [ ] **Phase 20** — Resume Studio (diff, versions, ATS, download)
+- [ ] **Phase 21** — Companies & Recruiters pages (use existing DB stubs)
+- [ ] **Phase 22** — Outreach drafts + follow-ups (approve / copy / mark sent)
+- [ ] **Phase 23** — Pipeline extensions (recruiter node, richer stages, auto-start)
+- [ ] **Phase 24** — OAuth email, extension ingest, deep analytics, vault graph UI
+
 ## API surface (implemented)
 
 | Area | Endpoints |

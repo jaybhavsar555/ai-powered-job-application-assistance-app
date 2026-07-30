@@ -1,6 +1,5 @@
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
-import asyncio
 
 from app.application.agents.base import OSAgent
 from app.application.agents.registry import agent_registry
@@ -35,12 +34,18 @@ class ResumeOptimizerAgent(OSAgent):
         job_details = state.get("job_description", "")
         system_prompt = prompt_registry.get_prompt(self.name)
 
-        await asyncio.sleep(0.3)
         result = await structured_generate(
             OptimizedResume,
             [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Base Resume:\n{base_resume}\n\nMissing ATS Skills:\n{', '.join(missing_skills)}\n\nJob Details:\n{job_details}"},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Base Resume:\n{(base_resume or '')[:1200]}\n\n"
+                        f"Missing ATS Skills:\n{', '.join(missing_skills)}\n\n"
+                        f"Job Details:\n{(job_details or '')[:1800]}"
+                    ),
+                },
             ],
             fallback=lambda: self._mock(missing_skills),
         )

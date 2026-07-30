@@ -1,19 +1,23 @@
 """
 Embedding helpers for long-term memory.
 
-Uses the OpenAI-compatible embeddings API (Ollama: nomic-embed-text, or
-OpenAI: text-embedding-3-small). Falls back to a deterministic local hash
-vector when no LLM endpoint is available so create/search still work offline.
+Uses a dedicated embeddings client so switching Canvas chat to Ollama does not
+route OpenAI embedding models through localhost (slow failures).
+
+Falls back to a deterministic local hash vector when no endpoint is available.
 """
 from __future__ import annotations
 
 import hashlib
 import math
 import struct
-from typing import List
+from typing import List, Optional
+
+import httpx
+from openai import AsyncOpenAI
 
 from app.core.config import get_settings
-from app.infrastructure.llm.client import get_raw_openai_client
+from app.infrastructure.llm.runtime import get_llm_runtime
 
 
 def _l2_normalize(vec: List[float]) -> List[float]:
@@ -31,11 +35,45 @@ def _hash_embed(text: str, dims: int) -> List[float]:
         for i in range(0, len(block) - 3, 4):
             if len(values) >= dims:
                 break
-            # Map uint32 to [-1, 1]
             n = struct.unpack(">I", block[i : i + 4])[0]
             values.append((n / 0xFFFFFFFF) * 2.0 - 1.0)
         counter += 1
     return _l2_normalize(values)
+
+
+def _is_openai_embedding_model(model: str) -> bool:
+    m = (model or "").lower()
+    return m.startswith("text-embedding")
+
+
+def get_embedding_client() -> Optional[AsyncOpenAI]:
+    """
+    Prefer OpenAI cloud for text-embedding-* models even when chat is on Ollama.
+    Use Ollama only for local embed models (e.g. nomic-embed-text).
+    """
+    settings = get_settings()
+    model = settings.EMBEDDING_MODEL
+    runtime = get_llm_runtime()
+
+    if _is_openai_embedding_model(model):
+        if not settings.OPENAI_API_KEY:
+            return None
+        return AsyncOpenAI(
+            api_key=settings.OPENAI_API_KEY,
+            timeout=httpx.Timeout(20.0, connect=5.0),
+        )
+
+    # Local / Ollama-compatible embed model
+    base = (
+        getattr(settings, "OLLAMA_BASE_URL", None)
+        or runtime.base_url
+        or "http://localhost:11434/v1"
+    ).rstrip("/")
+    return AsyncOpenAI(
+        api_key=getattr(settings, "OLLAMA_API_KEY", None) or "ollama",
+        base_url=base,
+        timeout=httpx.Timeout(20.0, connect=5.0),
+    )
 
 
 async def embed_text(text: str) -> List[float]:
@@ -45,7 +83,7 @@ async def embed_text(text: str) -> List[float]:
     if not cleaned:
         return _hash_embed("", dims)
 
-    client = get_raw_openai_client()
+    client = get_embedding_client()
     if client is None:
         return _hash_embed(cleaned, dims)
 
@@ -55,7 +93,6 @@ async def embed_text(text: str) -> List[float]:
             input=cleaned,
         )
         vector = list(response.data[0].embedding)
-        # Keep collection dimension consistent even if provider differs
         if len(vector) != dims:
             if len(vector) > dims:
                 vector = vector[:dims]
@@ -64,7 +101,6 @@ async def embed_text(text: str) -> List[float]:
             vector = _l2_normalize(vector)
         return vector
     except Exception:
-        # Model not pulled / endpoint down — degrade gracefully
         return _hash_embed(cleaned, dims)
 
 

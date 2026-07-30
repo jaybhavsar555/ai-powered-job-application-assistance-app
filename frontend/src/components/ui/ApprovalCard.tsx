@@ -1,5 +1,5 @@
-import React from 'react';
-import { Check, X, GitCommit, FileText, Loader2 } from 'lucide-react';
+import React from "react";
+import { Check, X, FileText, Loader2, Sparkles } from "lucide-react";
 
 interface ApprovalCardProps {
   title: string;
@@ -8,8 +8,10 @@ interface ApprovalCardProps {
   evidence: string;
   onApprove?: () => void;
   onReject?: () => void;
-  status?: 'pending' | 'approved' | 'rejected' | 'saving';
+  status?: "pending" | "approved" | "rejected" | "saving";
   disabled?: boolean;
+  /** When true, hide the low-value "OLD" placeholder and show draft-only layout */
+  isNewDraft?: boolean;
 }
 
 export function ApprovalCard({
@@ -19,25 +21,31 @@ export function ApprovalCard({
   evidence,
   onApprove,
   onReject,
-  status = 'pending',
+  status = "pending",
   disabled = false,
+  isNewDraft = false,
 }: ApprovalCardProps) {
-  const decided = status === 'approved' || status === 'rejected';
-  const saving = status === 'saving';
+  const decided = status === "approved" || status === "rejected";
+  const saving = status === "saving";
+  const showDiff = !isNewDraft && Boolean(originalText?.trim());
 
   return (
-    <div className={`border border-border rounded-xl bg-card overflow-hidden shadow-sm ${decided ? 'opacity-90' : ''}`}>
-      <div className="flex items-center justify-between p-3 border-b border-border bg-muted/30 gap-2">
+    <div
+      className={`border border-border rounded-xl bg-card overflow-hidden shadow-sm ${
+        decided ? "opacity-95" : ""
+      }`}
+    >
+      <div className="flex items-center justify-between p-4 border-b border-border bg-muted/40 gap-3">
         <div className="flex items-center gap-2 min-w-0">
-          <GitCommit className="h-4 w-4 text-primary shrink-0" />
-          <h4 className="font-semibold text-sm text-foreground truncate">{title}</h4>
-          {status === 'approved' && (
-            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">
+          <Sparkles className="h-4 w-4 text-primary shrink-0" />
+          <h4 className="font-semibold text-base text-foreground truncate">{title}</h4>
+          {status === "approved" && (
+            <span className="text-[11px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
               Approved
             </span>
           )}
-          {status === 'rejected' && (
-            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/20">
+          {status === "rejected" && (
+            <span className="text-[11px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30">
               Rejected
             </span>
           )}
@@ -45,43 +53,64 @@ export function ApprovalCard({
         {!decided && (
           <div className="flex items-center gap-2 shrink-0">
             <button
+              type="button"
               onClick={onReject}
               disabled={disabled || saving}
-              className="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded text-red-500 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-md text-red-300 border border-red-500/40 hover:bg-red-500/15 transition-colors disabled:opacity-50"
             >
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+              {saving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <X className="h-4 w-4" />
+              )}
               Reject
             </button>
             <button
+              type="button"
               onClick={onApprove}
               disabled={disabled || saving}
-              className="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+              {saving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Check className="h-4 w-4" />
+              )}
               Approve
             </button>
           </div>
         )}
       </div>
 
-      <div className="p-4 space-y-4">
-        <div className="grid grid-cols-1 gap-2 font-mono text-xs">
-          <div className="p-2.5 rounded bg-red-500/10 border border-red-500/20 text-red-400 relative">
-            <span className="absolute -left-1.5 top-2.5 text-[10px] bg-background px-1 rounded border border-border">OLD</span>
-            <span className="pl-4 break-words line-through opacity-80">{originalText}</span>
+      <div className="p-5 space-y-4">
+        {showDiff && (
+          <div className="rounded-lg border border-border bg-muted/30 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+              Previous
+            </p>
+            <p className="text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
+              {originalText}
+            </p>
           </div>
-          <div className="p-2.5 rounded bg-green-500/10 border border-green-500/20 text-green-400 relative">
-            <span className="absolute -left-1.5 top-2.5 text-[10px] bg-background px-1 rounded border border-border">NEW</span>
-            <span className="pl-4 break-words whitespace-pre-wrap">{proposedText}</span>
+        )}
+
+        <div className="rounded-lg border border-emerald-500/40 bg-emerald-950/40 p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300/90 mb-2">
+            {isNewDraft || !showDiff ? "Proposed draft" : "Proposed changes"}
+          </p>
+          <div className="text-[15px] leading-7 text-zinc-50 whitespace-pre-wrap break-words">
+            {proposedText}
           </div>
         </div>
 
-        <div className="p-3 bg-muted/40 rounded-lg border border-border/50">
-          <div className="flex items-start gap-2">
+        <div className="p-4 rounded-lg border border-border bg-muted/50">
+          <div className="flex items-start gap-3">
             <FileText className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">AI Reasoning</span>
-              <p className="text-xs text-foreground/80 leading-relaxed">{evidence}</p>
+            <div className="space-y-1.5 min-w-0">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Why this change
+              </span>
+              <p className="text-sm text-foreground leading-relaxed">{evidence}</p>
             </div>
           </div>
         </div>

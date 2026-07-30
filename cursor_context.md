@@ -3,10 +3,10 @@
 **Project Name:** AI Powered Job Application Assistance App (**Career OS**)  
 **Repo:** https://github.com/jaybhavsar555/ai-powered-job-application-assistance-app  
 **Workspace:** `c:\ai_powered_job_application_assistance_app`  
-**Status (2026-07-31):** Phases **0–17 complete**. Core product loop ships. Optional backlog only (OAuth, K8s/Helm, paid marketplace).  
+**Status (2026-07-31):** Phases **0–17 complete** (Advanced Workspace). Simple Mode / Career Inbox = **spec only** → [docs/product_simple_mode_roadmap.md](docs/product_simple_mode_roadmap.md) (Phases 18–24).  
 **Latest commits on `main`:** durable checkpoints, SSE auth fix, Vault seed without hanging on embeddings.
 
-Use this file to resume work in Antigravity or a new Cursor chat. Prefer also: [docs/implementation_plan.md](docs/implementation_plan.md), [docs/walkthrough.md](docs/walkthrough.md), [docs/deploy.md](docs/deploy.md), [README.md](README.md).
+Use this file to resume work in Antigravity or a new Cursor chat. Prefer also: [docs/user_guide.md](docs/user_guide.md) (how to use features), [docs/implementation_plan.md](docs/implementation_plan.md), [docs/walkthrough.md](docs/walkthrough.md), [docs/deploy.md](docs/deploy.md), [README.md](README.md).
 
 ---
 

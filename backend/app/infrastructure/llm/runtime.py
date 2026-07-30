@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from threading import Lock
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from app.core.config import get_settings
 
@@ -25,11 +25,29 @@ class LlmRuntimeConfig:
     force_mock: bool
     timeout_seconds: float
     max_tokens: int
+    num_ctx: int = 0
+    keep_alive: str = ""
+    num_thread: int = 0
 
     @property
     def use_local_json_mode(self) -> bool:
         base = (self.base_url or "").strip().lower()
         return bool(base) and "api.openai.com" not in base
+
+    def ollama_extra_body(self) -> dict[str, Any]:
+        """Options that keep local models warm and completions bounded."""
+        options: dict[str, Any] = {
+            "num_predict": self.max_tokens,
+            "temperature": 0.2,
+        }
+        if self.num_ctx > 0:
+            options["num_ctx"] = self.num_ctx
+        if self.num_thread and self.num_thread > 0:
+            options["num_thread"] = self.num_thread
+        body: dict[str, Any] = {"options": options}
+        if self.keep_alive:
+            body["keep_alive"] = self.keep_alive
+        return body
 
 
 def _infer_boot_provider(settings) -> ProviderName:
@@ -50,8 +68,8 @@ def _infer_boot_provider(settings) -> ProviderName:
 
 def build_config(provider: ProviderName, model: Optional[str] = None) -> LlmRuntimeConfig:
     settings = get_settings()
-    timeout = float(getattr(settings, "LLM_TIMEOUT_SECONDS", 45) or 45)
-    max_tokens = int(getattr(settings, "LLM_MAX_TOKENS", 700) or 700)
+    cloud_timeout = float(getattr(settings, "LLM_TIMEOUT_SECONDS", 45) or 45)
+    cloud_max_tokens = int(getattr(settings, "LLM_MAX_TOKENS", 700) or 700)
 
     if provider == "mock":
         return LlmRuntimeConfig(
@@ -60,8 +78,8 @@ def build_config(provider: ProviderName, model: Optional[str] = None) -> LlmRunt
             base_url="",
             api_key="",
             force_mock=True,
-            timeout_seconds=timeout,
-            max_tokens=max_tokens,
+            timeout_seconds=cloud_timeout,
+            max_tokens=cloud_max_tokens,
         )
 
     if provider == "ollama":
@@ -70,14 +88,27 @@ def build_config(provider: ProviderName, model: Optional[str] = None) -> LlmRunt
             or getattr(settings, "OLLAMA_MODEL", None)
             or "qwen2.5:3b"
         )
+        ollama_timeout = float(
+            getattr(settings, "OLLAMA_TIMEOUT_SECONDS", None)
+            or cloud_timeout
+            or 90
+        )
+        ollama_max = int(
+            getattr(settings, "OLLAMA_MAX_TOKENS", None)
+            or min(cloud_max_tokens, 200)
+            or 200
+        )
         return LlmRuntimeConfig(
             provider="ollama",
             model=ollama_model,
             base_url=(getattr(settings, "OLLAMA_BASE_URL", None) or "http://localhost:11434/v1").rstrip("/"),
             api_key=getattr(settings, "OLLAMA_API_KEY", None) or "ollama",
             force_mock=False,
-            timeout_seconds=timeout,
-            max_tokens=max_tokens,
+            timeout_seconds=ollama_timeout,
+            max_tokens=ollama_max,
+            num_ctx=int(getattr(settings, "OLLAMA_NUM_CTX", 2048) or 2048),
+            keep_alive=str(getattr(settings, "OLLAMA_KEEP_ALIVE", None) or "30m"),
+            num_thread=int(getattr(settings, "OLLAMA_NUM_THREAD", 0) or 0),
         )
 
     # openai cloud
@@ -99,8 +130,8 @@ def build_config(provider: ProviderName, model: Optional[str] = None) -> LlmRunt
         base_url="",  # official OpenAI SDK default
         api_key=settings.OPENAI_API_KEY or "",
         force_mock=False,
-        timeout_seconds=timeout,
-        max_tokens=max_tokens,
+        timeout_seconds=cloud_timeout,
+        max_tokens=cloud_max_tokens,
     )
 
 
@@ -138,6 +169,8 @@ def runtime_status() -> dict:
         "force_mock": cfg.force_mock,
         "timeout_seconds": cfg.timeout_seconds,
         "max_tokens": cfg.max_tokens,
+        "num_ctx": cfg.num_ctx or None,
+        "keep_alive": cfg.keep_alive or None,
         "openai_configured": bool(settings.OPENAI_API_KEY),
         "ollama_base_url": getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434/v1"),
         "openai_model_default": getattr(settings, "OPENAI_MODEL", None) or "gpt-4o",
@@ -151,6 +184,9 @@ def runtime_status() -> dict:
             "ollama": {
                 "model": getattr(settings, "OLLAMA_MODEL", None) or "qwen2.5:3b",
                 "base_url": getattr(settings, "OLLAMA_BASE_URL", None) or "http://localhost:11434/v1",
+                "max_tokens": int(getattr(settings, "OLLAMA_MAX_TOKENS", 200) or 200),
+                "num_ctx": int(getattr(settings, "OLLAMA_NUM_CTX", 2048) or 2048),
+                "keep_alive": str(getattr(settings, "OLLAMA_KEEP_ALIVE", None) or "30m"),
                 "ready": True,
             },
             "mock": {

@@ -24,7 +24,7 @@ const OPTIONS: {
   hint: string;
 }[] = [
   { id: "openai", label: "OpenAI", icon: Cloud, hint: "Cloud — fast" },
-  { id: "ollama", label: "Ollama", icon: Cpu, hint: "Local" },
+  { id: "ollama", label: "Ollama", icon: Cpu, hint: "Local — warms model on switch" },
   { id: "mock", label: "Mock", icon: Zap, hint: "Instant demo" },
 ];
 

@@ -1,11 +1,11 @@
 from typing import Dict, Any
-import asyncio
 from app.schemas.job import NormalizedJob
 
 from app.application.agents.base import OSAgent
 from app.application.agents.registry import agent_registry
 from app.core.prompts.registry import prompt_registry
 from app.infrastructure.llm.client import structured_generate
+from app.infrastructure.llm.runtime import get_llm_runtime
 
 class JobIntakeAgent(OSAgent):
     name = "job_intake_agent"
@@ -31,8 +31,8 @@ class JobIntakeAgent(OSAgent):
     ) -> NormalizedJob:
         system_prompt = prompt_registry.get_prompt(self.name)
         # Keep prompt small — long JDs make CPU Ollama crawl
-        raw = (raw_description or "")[:3500]
-        await asyncio.sleep(0.05)
+        limit = 1800 if get_llm_runtime().provider == "ollama" else 3500
+        raw = (raw_description or "")[:limit]
         return await structured_generate(
             NormalizedJob,
             [

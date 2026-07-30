@@ -1,10 +1,11 @@
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_current_user
 from app.domain.models import User
+from app.infrastructure.llm.client import warm_ollama_model
 from app.infrastructure.llm.runtime import runtime_status, set_llm_provider
 
 router = APIRouter()
@@ -27,11 +28,13 @@ async def get_llm_provider(current_user: User = Depends(get_current_user)):
 @router.put("/provider")
 async def update_llm_provider(
     data: LlmProviderUpdate,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
 ):
     """
     Switch workflow LLM between OpenAI cloud, local Ollama, or mock.
     Applies immediately to the next agent call (no API restart).
+    Switching to Ollama also warms the model so the first agent is not a cold load.
     """
     if data.provider == "openai":
         status = runtime_status()
@@ -42,7 +45,16 @@ async def update_llm_provider(
             )
 
     cfg = set_llm_provider(data.provider, model=data.model)
+    warm_result = None
+    if cfg.provider == "ollama":
+        # Await warm so the first Simulate does not pay ~8s model load per agent.
+        warm_result = await warm_ollama_model(cfg)
+        if not warm_result.get("warmed"):
+            # Retry once in background if the first attempt failed (Ollama still starting).
+            background_tasks.add_task(warm_ollama_model, cfg)
+
     return {
         **runtime_status(),
         "message": f"LLM provider set to {cfg.provider} ({cfg.model})",
+        "warm": warm_result,
     }

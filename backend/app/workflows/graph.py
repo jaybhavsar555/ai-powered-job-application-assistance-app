@@ -155,10 +155,13 @@ def build_graph(checkpointer=None, *, backend: str = "memory"):
 
     workflow.set_entry_point("Job Intake Agent")
 
+    # Fan-out: company scrape/LLM can overlap with ATS while the model stays warm.
     workflow.add_edge("Job Intake Agent", "Company Research Agent")
-    workflow.add_edge("Company Research Agent", "ATS Analyzer")
+    workflow.add_edge("Job Intake Agent", "ATS Analyzer")
     workflow.add_edge("ATS Analyzer", "Resume Optimizer")
+    # Cover letter waits for both resume + company research (LangGraph join).
     workflow.add_edge("Resume Optimizer", "Cover Letter Agent")
+    workflow.add_edge("Company Research Agent", "Cover Letter Agent")
     workflow.add_edge("Cover Letter Agent", END)
 
     if checkpointer is None:

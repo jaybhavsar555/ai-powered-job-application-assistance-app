@@ -28,7 +28,13 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
     OLLAMA_API_KEY: str = "ollama"
     OLLAMA_MODEL: str = "qwen2.5:3b"
-    # Cap wait for local CPU Ollama; then agents use mocks
+    # Local CPU is ~3 tok/s — keep completions short and the model resident
+    OLLAMA_MAX_TOKENS: int = 200
+    OLLAMA_NUM_CTX: int = 2048
+    OLLAMA_KEEP_ALIVE: str = "30m"
+    OLLAMA_TIMEOUT_SECONDS: float = 75.0
+    OLLAMA_NUM_THREAD: int = 0  # 0 = Ollama default (use all cores)
+    # Cap wait for cloud / shared; Ollama uses OLLAMA_TIMEOUT_SECONDS
     LLM_TIMEOUT_SECONDS: float = 45.0
     LLM_MAX_TOKENS: int = 700
     # Set true for instant Simulate demos (skip real LLM entirely)

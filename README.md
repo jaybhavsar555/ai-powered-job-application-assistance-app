@@ -107,6 +107,8 @@ LLM calls go through `app/infrastructure/llm/client.py` (shared OpenAI-compatibl
 
 ## More documentation
 
+- [**User guide**](docs/user_guide.md) — features, use cases, real Tracker loop (start here)
+- [**Simple Mode / Career Inbox roadmap**](docs/product_simple_mode_roadmap.md) — product gap vs Advanced Workspace (Phases 18–24)
 - [Current system walkthrough](docs/walkthrough.md) — phases 0–11, verify steps, **troubleshooting** (model 404, SSE)
 - [Architecture overview](docs/architecture_design.md)
 - [Implementation status](docs/implementation_plan.md)

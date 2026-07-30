@@ -1,5 +1,4 @@
 from typing import Dict, Any, List, Optional
-import asyncio
 from pydantic import BaseModel, Field
 
 from app.application.agents.base import OSAgent
@@ -58,7 +57,6 @@ class CompanyResearchAgent(OSAgent):
         system_prompt = prompt_registry.get_prompt(self.name)
 
         signals = await gather_company_signals(company, job_url)
-        await asyncio.sleep(0.2)
 
         result = await structured_generate(
             CompanyResearchResult,
@@ -71,7 +69,7 @@ class CompanyResearchAgent(OSAgent):
                         f"Job title: {job.get('role_title', state.get('title', ''))}\n"
                         f"Research source: {signals.source}\n"
                         f"Sources: {', '.join(signals.sources)}\n\n"
-                        f"Raw research text:\n{signals.raw_text}"
+                        f"Raw research text:\n{(signals.raw_text or '')[:2000]}"
                     ),
                 },
             ],
