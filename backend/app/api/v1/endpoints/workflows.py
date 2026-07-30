@@ -21,9 +21,24 @@ def _user_from_token(token: str) -> User:
         user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-        return User(id=UUID(user_id), email="token@career-os.local", auth_provider="local")
-    except (JWTError, ValueError):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        # EmailStr rejects reserved TLDs like .local — use a valid placeholder for SSE-only User
+        return User(
+            id=UUID(user_id),
+            email="sse@example.com",
+            auth_provider="local",
+        )
+    except HTTPException:
+        raise
+    except (JWTError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid token ({type(exc).__name__})",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid token ({type(exc).__name__}: {exc})",
+        ) from exc
 
 
 @router.get("/checkpointer")

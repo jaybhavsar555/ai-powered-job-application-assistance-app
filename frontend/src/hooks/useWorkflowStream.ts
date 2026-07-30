@@ -86,11 +86,16 @@ export function useWorkflowStream(jobId: string, resume = false, nonce = 0) {
     };
 
     eventSource.onerror = () => {
+      // EventSource hides status codes; common causes: 401 (bad/expired JWT) or API down
+      const ready = eventSource.readyState;
       addEvent({
         type: 'ERROR',
         node: 'System',
         timestamp: new Date().toISOString(),
-        error: `SSE connection failed (${API_BASE}). Is the API on :8001 and Redis up?`,
+        error:
+          ready === EventSource.CLOSED
+            ? `SSE closed (${API_BASE}). Check API on :8001, valid login token, and that a real Tracker job is selected (not only demo). Redis is optional for same-process events.`
+            : `SSE connection failed (${API_BASE}). Is the API on :8001?`,
       });
       setWorkflowStatus('error');
       eventSource.close();
