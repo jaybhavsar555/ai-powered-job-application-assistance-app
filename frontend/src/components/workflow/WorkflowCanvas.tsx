@@ -49,7 +49,7 @@ function norm(s: string) {
 
 export function WorkflowCanvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [edges, , onEdgesChange] = useEdgesState(initialEdges);
   const { nodeTelemetry, activeNode, selectedNode, setSelectedNode } = useWorkflowStore();
 
   const nodeTypes = useMemo<NodeTypes>(() => ({ custom: CustomWorkflowNode as never }), []);

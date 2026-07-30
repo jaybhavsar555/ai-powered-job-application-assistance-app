@@ -27,7 +27,9 @@ export function Timeline() {
               <span className="text-sm font-medium">{evt.node || evt.agent || evt.type}</span>
               <span className="text-xs text-muted-foreground flex items-center gap-1 mt-2">
                 <Clock className="w-3 h-3" />
-                {new Date(evt.timestamp || Date.now()).toLocaleTimeString()}
+                {evt.timestamp
+                  ? new Date(evt.timestamp).toLocaleTimeString()
+                  : '—'}
               </span>
             </div>
           </div>

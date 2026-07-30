@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, TerminalSquare, Database, ArrowRight } from 'lucide-react';
+import { Bot, ArrowRight } from 'lucide-react';
 import { ThinkingIndicator } from './ThinkingIndicator';
 
 interface AgentCardProps {
