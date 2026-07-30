@@ -16,6 +16,7 @@ class DBUser(Base, DBBase):
     email = Column(String, unique=True, index=True, nullable=False)
     auth_provider = Column(String, default="local")
     hashed_password = Column(String, nullable=False)
+    role = Column(String, default="user", nullable=False)  # admin | user | demo
     
     wiki_entities = relationship("DBWikiEntity", back_populates="user")
     resumes = relationship("DBResume", back_populates="user")

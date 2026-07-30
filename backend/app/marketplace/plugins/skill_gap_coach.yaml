@@ -1,0 +1,10 @@
+name: skill_gap_coach
+title: Skill Gap Coach
+description: 'Marketplace agent that turns ATS missing skills into a short learning
+  plan. Enable it here, then call it via GET /agents/ after registration.
+
+  '
+version: 0.1.0
+author: career-os
+enabled: false
+entry: app.marketplace.plugins.skill_gap_agent

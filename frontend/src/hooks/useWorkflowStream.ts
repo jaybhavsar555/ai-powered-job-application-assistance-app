@@ -1,40 +1,73 @@
 import { useEffect } from 'react';
-import { useWorkflowStore } from './useWorkflowStore';
+import { useWorkflowStore, type WorkflowEvent } from './useWorkflowStore';
+import { useAuthStore } from '@/store/auth';
 
-export function useWorkflowStream(jobId: string) {
-  const { setActiveNode, setNodeTelemetry, setWorkflowStatus, setFinalState, addEvent, reset } = useWorkflowStore();
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api/v1';
+
+function agentKey(data: { node?: string; agent?: string }) {
+  return data.node || data.agent || 'unknown';
+}
+
+export function useWorkflowStream(jobId: string, resume = false, nonce = 0) {
+  const { setActiveNode, setNodeTelemetry, setWorkflowStatus, setFinalState, addEvent, reset } =
+    useWorkflowStore();
 
   useEffect(() => {
     if (!jobId) return;
 
+    const token = useAuthStore.getState().token;
+    if (!token) {
+      addEvent({
+        type: 'ERROR',
+        node: 'System',
+        timestamp: new Date().toISOString(),
+        error: 'Not authenticated — sign in or wait for demo login, then retry.',
+      });
+      setWorkflowStatus('error');
+      return;
+    }
+
     reset();
     setWorkflowStatus('running');
-    
-    const eventSource = new EventSource(`http://localhost:8000/api/v1/workflows/${jobId}/stream`);
+    addEvent({
+      type: 'SYSTEM',
+      node: 'System',
+      timestamp: new Date().toISOString(),
+      message: resume
+        ? `Resuming workflow checkpoint for job ${jobId}…`
+        : `Initializing workflow stream for job ${jobId}…`,
+    });
+
+    const url =
+      `${API_BASE}/workflows/${jobId}/stream?token=${encodeURIComponent(token)}` +
+      (resume ? '&resume=true' : '');
+    const eventSource = new EventSource(url);
 
     eventSource.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data);
-        
-        // Save the raw event for the Timeline
+        const data = JSON.parse(event.data) as WorkflowEvent;
+        const name = agentKey(data);
+
         addEvent({
           ...data,
-          timestamp: new Date().toISOString()
+          node: name,
+          timestamp: new Date().toISOString(),
         });
-        
+
         if (data.type === 'AGENT_STARTED') {
-          setActiveNode(data.agent);
-          setNodeTelemetry(data.agent, { status: 'running' });
+          setActiveNode(name);
+          setNodeTelemetry(name, { status: 'running' });
         } else if (data.type === 'AGENT_SUCCESS') {
-          if (data.payload) {
-            setNodeTelemetry(data.agent, {
-              status: 'success',
-              latency_ms: data.payload.latency_ms,
-              tokens: data.payload.tokens,
-              cost: data.payload.cost,
-              evidence: data.payload.evidence,
-            });
-          }
+          const payload = (data.payload || {}) as Record<string, unknown>;
+          setNodeTelemetry(name, {
+            status: 'success',
+            latency_ms: (data.latency_ms ?? payload.latency_ms) as number | undefined,
+            tokens: (data.tokens ?? payload.tokens) as number | undefined,
+            cost: (data.cost ?? payload.cost) as number | undefined,
+            evidence: data.evidence ?? payload.evidence,
+          });
+        } else if (data.type === 'AGENT_ERROR') {
+          setNodeTelemetry(name, { status: 'error' });
         } else if (data.type === 'COMPLETED') {
           if (data.final_state) {
             setFinalState(data.final_state);
@@ -44,14 +77,21 @@ export function useWorkflowStream(jobId: string) {
           eventSource.close();
         } else if (data.type === 'ERROR') {
           setWorkflowStatus('error');
+          setActiveNode(null);
           eventSource.close();
         }
       } catch (e) {
-        console.error("Error parsing SSE data", e);
+        console.error('Error parsing SSE data', e);
       }
     };
 
     eventSource.onerror = () => {
+      addEvent({
+        type: 'ERROR',
+        node: 'System',
+        timestamp: new Date().toISOString(),
+        error: `SSE connection failed (${API_BASE}). Is the API on :8001 and Redis up?`,
+      });
       setWorkflowStatus('error');
       eventSource.close();
     };
@@ -59,5 +99,5 @@ export function useWorkflowStream(jobId: string) {
     return () => {
       eventSource.close();
     };
-  }, [jobId]);
+  }, [jobId, resume, nonce]);
 }

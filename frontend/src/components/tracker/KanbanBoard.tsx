@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Briefcase, RefreshCw, LayoutGrid } from "lucide-react";
-import api from "@/lib/api";
+import api, { getApiErrorMessage } from "@/lib/api";
 import { Application, ApplicationStage } from "./ApplicationCard";
+import { JobIngestForm } from "./JobIngestForm";
 import { KanbanColumn } from "./KanbanColumn";
 
 const STAGES: { stage: ApplicationStage; accent: string }[] = [
@@ -21,6 +22,8 @@ export function KanbanBoard() {
   const [error, setError] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<ApplicationStage | null>(null);
   const [movingId, setMovingId] = useState<string | null>(null);
+  const [packagingId, setPackagingId] = useState<string | null>(null);
+  const [packageMessage, setPackageMessage] = useState<string | null>(null);
 
   const fetchApplications = useCallback(async () => {
     setLoading(true);
@@ -29,11 +32,7 @@ export function KanbanBoard() {
       const { data } = await api.get<Application[]>("/applications/");
       setApplications(data);
     } catch (err: unknown) {
-      const message =
-        err && typeof err === "object" && "message" in err
-          ? String((err as { message: string }).message)
-          : "Failed to load applications";
-      setError(message);
+      setError(getApiErrorMessage(err, "Failed to load applications"));
     } finally {
       setLoading(false);
     }
@@ -97,13 +96,35 @@ export function KanbanBoard() {
   const byStage = (stage: ApplicationStage) =>
     applications.filter((a) => a.stage === stage);
 
+  const handleGeneratePackage = async (applicationId: string) => {
+    setPackagingId(applicationId);
+    setPackageMessage(null);
+    setError(null);
+    try {
+      const { data } = await api.post<{
+        folder: string;
+        company: string;
+        role_family: string;
+        files: Record<string, string>;
+      }>("/documents/apply-package", { application_id: applicationId });
+      setPackageMessage(
+        `Saved ${data.company} package (${data.role_family}) → ${data.folder}`
+      );
+      await fetchApplications();
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, "Failed to generate apply package"));
+    } finally {
+      setPackagingId(null);
+    }
+  };
+
   return (
     <div className="h-full min-h-0 flex flex-col p-8 space-y-6">
       <div className="flex justify-between items-center shrink-0">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Jobs Tracker</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Drag applications across pipeline stages
+            Drag stages · Package writes tailored DOCX/PDF under your resume folder
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -121,6 +142,14 @@ export function KanbanBoard() {
           </button>
         </div>
       </div>
+
+      <JobIngestForm onIngested={fetchApplications} />
+
+      {packageMessage && (
+        <div className="text-sm text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-md px-3 py-2 shrink-0">
+          {packageMessage}
+        </div>
+      )}
 
       {loading && applications.length === 0 ? (
         <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -146,7 +175,7 @@ export function KanbanBoard() {
           <div>
             <h3 className="font-semibold text-lg text-foreground">Pipeline is empty</h3>
             <p className="text-sm text-muted-foreground max-w-sm mt-1">
-              Ingest a job to automatically add it to Wishlist. Applications will show up here as Kanban cards.
+              Use Import job above — paste a posting URL (Playwright scrape) or raw text. It lands in Wishlist.
             </p>
           </div>
         </div>
@@ -176,6 +205,8 @@ export function KanbanBoard() {
                     onDragOver={(e) => handleDragOver(e, stage)}
                     onDrop={handleDrop}
                     isDropTarget={dragOverStage === stage}
+                    onGeneratePackage={handleGeneratePackage}
+                    packagingId={packagingId}
                   />
                 </div>
               ))}

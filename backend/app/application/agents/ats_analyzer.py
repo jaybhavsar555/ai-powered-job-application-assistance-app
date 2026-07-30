@@ -1,12 +1,11 @@
-import os
-import instructor
-from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
+import asyncio
 
 from app.application.agents.base import OSAgent
 from app.application.agents.registry import agent_registry
 from app.core.prompts.registry import prompt_registry
+from app.infrastructure.llm.client import structured_generate
 
 class ATSAnalysisResult(BaseModel):
     score: int = Field(..., description="ATS fit score from 0 to 100")
@@ -19,40 +18,28 @@ class ATSAnalyzerAgent(OSAgent):
     description = "Analyzes resumes against Job Descriptions to extract missing keywords and generate an ATS score."
     capabilities = ["web"]
 
-    def __init__(self):
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        if self.api_key:
-            self.client = instructor.from_openai(AsyncOpenAI(api_key=self.api_key))
-        else:
-            self.client = None
+    def _mock(self) -> ATSAnalysisResult:
+        return ATSAnalysisResult(
+            score=65,
+            matching_skills=["Python", "SQL"],
+            missing_skills=["FastAPI", "Docker", "AWS"],
+            recommendation="Add FastAPI and Docker to recent experience bullets to bypass ATS filters.",
+        )
 
     async def run(self, state: Dict[str, Any], *args, **kwargs) -> Dict[str, Any]:
         resume_content = state.get("resume_json", "{}")
         job_description = state.get("job_description", "")
-        
         system_prompt = prompt_registry.get_prompt(self.name)
 
-        if not self.client:
-            # Fallback mock for local dev without API Key
-            import asyncio
-            await asyncio.sleep(2)
-            result = ATSAnalysisResult(
-                score=65,
-                matching_skills=["Python", "SQL"],
-                missing_skills=["FastAPI", "Docker", "AWS"],
-                recommendation="Add FastAPI and Docker to recent experience bullets to bypass ATS filters."
-            )
-            return {"ats_score": result.model_dump()}
-            
-        result = await self.client.chat.completions.create(
-            model="gpt-4o",
-            response_model=ATSAnalysisResult,
-            messages=[
+        await asyncio.sleep(0.3)
+        result = await structured_generate(
+            ATSAnalysisResult,
+            [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Resume:\n{resume_content}\n\nJob Description:\n{job_description}"}
-            ]
+                {"role": "user", "content": f"Resume:\n{resume_content}\n\nJob Description:\n{job_description}"},
+            ],
+            fallback=self._mock,
         )
         return {"ats_score": result.model_dump()}
 
-# Register the agent
 agent_registry.register(ATSAnalyzerAgent())

@@ -11,6 +11,7 @@ class DomainBase(BaseModel):
 class UserBase(DomainBase):
     email: EmailStr
     auth_provider: str
+    role: str = "user"
 
 class UserCreate(UserBase):
     password: str

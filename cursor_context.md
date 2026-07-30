@@ -1,39 +1,36 @@
 # Project Context for Cursor
-**Project Name**: AI Powered Job Application Assistance App (AI OS Platform)
+**Project Name**: AI Powered Job Application Assistance App (Career OS)
 
-This document contains the complete context of our conversation and the architecture of the platform we've been building. You can use this as your primary context file in Cursor to continue development seamlessly.
+Primary continuity file for Cursor. Prefer [docs/walkthrough.md](docs/walkthrough.md), [docs/deploy.md](docs/deploy.md), and [README.md](README.md).
 
 ## Product Vision
-We shifted from a standard backend-heavy application to a **Platform** with AI observability, human-in-the-loop, knowledge graph, and agent visualization built in from day one. It looks and feels like a premium AI Operating System (Obsidian/Linear dark mode aesthetic).
+Platform with AI observability, human-in-the-loop, knowledge graph, and agent visualization. Obsidian/Linear-inspired dark workspace.
 
 ## Tech Stack
-- **Frontend**: Next.js (App Router), Tailwind CSS, Zustand (Global State), React Flow (Agent Visualization), Server-Sent Events (SSE).
-- **Backend**: FastAPI, PostgreSQL (SQLAlchemy), Redis (Pub/Sub Event Bus), LangGraph (Agent Orchestration), Langchain.
-- **Architecture**: Event-driven architecture with an Agent Registry, Prompt Registry, and centralized telemetry.
+- **Frontend**: Next.js App Router, Tailwind, Zustand, React Flow, SSE. API base **`http://localhost:8001/api/v1`**.
+- **Backend**: FastAPI on **port 8001**, PostgreSQL, Redis Pub/Sub, LangGraph (+ durable Postgres checkpointer), Instructor.
+- **LLM**: OpenAI / Ollama / mock via `infrastructure/llm/runtime.py` (Canvas switcher).
+- **Memory**: WikiEntity + Qdrant (`infrastructure/memory/`).
+- **Auth**: `/auth/register`, `/auth/login`, `/auth/demo` — UI at `/login`.
+- **Marketplace**: YAML plugins + `/marketplace`.
+- **Packages**: `POST /documents/apply-package` → company folders under `RESUME_SOURCE_DIR`.
+- **Checkpoints**: `CHECKPOINT_BACKEND=postgres` → `AsyncPostgresSaver`; falls back to MemorySaver.
 
-## Database & Knowledge Graph Architecture
-We redesigned the database to support a "Knowledge Vault" rather than static tables.
-- **WikiEntity**: Extracted skills, experiences, projects, and companies are stored as graph nodes (`DBWikiEntity`) belonging to the user.
-- **AgentEventLog**: Every agent execution saves exact tokens, latency, cost, and extracted evidence to PostgreSQL.
-- **Core Models**: `User`, `Job`, `Application` (tracks pipeline stage), `Resume`, `ResumeVersion`, `CoverLetter`.
+## Phases 0–17
+- 0–11 — DONE
+- **12 — DONE (enhanced)**: Roles + seed accounts on `/login`
+  - `admin@example.com` / `Admin123!` (admin)
+  - `jay.bhavsar.dev@gmail.com` / `Admin123!` (admin)
+  - `demo@example.com` / `Demo1234!` (demo)
+  - `user@example.com` / `User1234!` (user)
+- **13–15 — DONE**: checkpoints (in-memory), marketplace, prod compose
+- **16 — DONE**: Real job-linked workflows (Canvas picker, Tracker deep link, auto package)
+- **17 — DONE**: Durable LangGraph checkpoints in Postgres (`GET /workflows/checkpointer`)
 
-## Agent Workflow & Telemetry Pipeline
-1. **LangGraph (`app/workflows/graph.py`)**: Orchestrates agents (Job Intake -> Company Research -> ATS Analyzer -> Resume Optimizer -> Cover Letter Agent).
-2. **Base OSAgent (`app/application/agents/base.py`)**: All agents inherit from this. It automatically calculates token usage, latency, and cost, then publishes `AGENT_STARTED` and `AGENT_SUCCESS` events to a Redis Pub/Sub channel (`workflow_events`).
-3. **SSE Stream (`app/api/v1/endpoints/workflows.py`)**: FastAPI subscribes to Redis and streams these events in real-time to the frontend.
-4. **Zustand State (`frontend/src/hooks/useWorkflowStore.ts`)**: The frontend catches these events, updates the global state, and instantly renders the telemetry on the React Flow Canvas (`WorkflowCanvas.tsx`) and the Node Inspector (`InspectorPanel.tsx`).
+## Local services
+`docker compose up -d` → Postgres, Redis, Qdrant, Ollama.  
+Pull: `qwen2.5:3b`, `nomic-embed-text`.  
+API: `uvicorn app.main:app --reload --port 8001`.
 
-## Completed Phases (0 to 7)
-- **Phase 0 & 1**: Architected the system, scaffolded the Next.js `(workspace)` routes, and built the sleek dark-mode `WorkspaceLayout`.
-- **Phase 2**: Built premium UI components (`ApprovalCard` for Git-diffs, `TelemetryBadge`, `CustomWorkflowNode`).
-- **Phase 3**: Refactored the DB schema, dropping `UserKnowledgeBase` in favor of the `WikiEntity` graph approach, and applied Alembic migrations.
-- **Phase 4**: Implemented the `AgentRegistry` and refactored all backend agents to inherit from the `OSAgent` base class for unified logging.
-- **Phase 5 & 6**: Built the Redis Event Bus, wired up the FastAPI SSE endpoint, and updated the React frontend to display live agent executions, animations, and exact telemetry/evidence in the Inspector panel.
-- **Phase 7**: Built the Human-in-the-Loop **Approvals UI** (using the Git-diff `ApprovalCard` to accept/reject AI-generated resumes/cover letters) and the **Knowledge Vault UI** (fetching `WikiEntity` data from the DB).
-
-## Phase 8 (In Progress / Partially Complete)
-1. **Jobs Tracker (`/tracker`)** — **DONE**: Kanban board over `DBApplication` stages (Wishlist → Researching → Ready → Applied → Interview → Rejected). Backend: `GET/POST /applications`, `PATCH /applications/{id}/stage`. Job ingest auto-creates a Wishlist application. Frontend: drag-and-drop `KanbanBoard` with optimistic stage updates.
-2. **Analytics/Dashboard (`/analytics`)**: Still a placeholder — needs to aggregate telemetry (costs, tokens, success rates) from `AgentEventLog`.
-3. **Long-Term Memory / Vector DB**: We have `vector_id` in our `WikiEntity` table, but Qdrant/Pinecone integration for semantic retrieval is pending.
-
-You are now fully caught up. Happy coding in Cursor!
+## Prod
+See [docs/deploy.md](docs/deploy.md).

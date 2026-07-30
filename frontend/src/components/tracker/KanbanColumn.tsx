@@ -10,6 +10,8 @@ interface KanbanColumnProps {
   onDragOver: (e: React.DragEvent) => void;
   onDrop: (e: React.DragEvent, stage: ApplicationStage) => void;
   isDropTarget: boolean;
+  onGeneratePackage?: (applicationId: string) => void;
+  packagingId?: string | null;
 }
 
 export function KanbanColumn({
@@ -20,6 +22,8 @@ export function KanbanColumn({
   onDragOver,
   onDrop,
   isDropTarget,
+  onGeneratePackage,
+  packagingId,
 }: KanbanColumnProps) {
   return (
     <div
@@ -52,6 +56,8 @@ export function KanbanColumn({
               key={app.id}
               application={app}
               onDragStart={onDragStart}
+              onGeneratePackage={onGeneratePackage}
+              packagingId={packagingId}
             />
           ))
         )}

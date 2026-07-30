@@ -4,8 +4,10 @@ from uuid import UUID
 from typing import List
 from fastapi import HTTPException
 from app.infrastructure.db.models import DBJob, DBApplication
+from app.infrastructure.scraping import scrape_job_page
 from app.schemas.job import JobCreate
 from app.application.agents.job_intake import JobIntakeAgent
+
 
 class JobService:
     def __init__(self, db: AsyncSession):
@@ -13,36 +15,64 @@ class JobService:
         self.agent = JobIntakeAgent()
 
     async def ingest_job(self, user_id: UUID, data: JobCreate) -> DBJob:
-        # If a URL is provided but no raw description, we would scrape it here.
-        # For MVP, we assume raw_description is passed or we mock the scraping.
-        raw_text = data.description_raw or f"Simulated scrape of {data.url}"
-        
-        # Call the Agent to normalize the unstructured text
+        if not data.url and not (data.description_raw and data.description_raw.strip()):
+            raise HTTPException(
+                status_code=400,
+                detail="Provide a job url and/or description_raw",
+            )
+
+        scrape_source = "provided"
+        scrape_error = None
+        title = data.role_title or ""
+        company = data.company_name or ""
+
+        if data.description_raw and data.description_raw.strip():
+            raw_text = data.description_raw.strip()
+        else:
+            scraped = await scrape_job_page(str(data.url))
+            raw_text = scraped.text
+            scrape_source = scraped.source
+            scrape_error = scraped.error
+            if not title and scraped.title:
+                title = scraped.title
+            if not company and scraped.company:
+                company = scraped.company
+            print(
+                f"[JobService] scrape url={data.url} source={scrape_source} "
+                f"chars={len(raw_text)} error={scrape_error}"
+            )
+
         normalized = await self.agent.extract_and_normalize(
             raw_description=raw_text,
-            title=data.role_title or "",
-            company=data.company_name or ""
+            title=title,
+            company=company,
         )
-        
-        # Create the Job record
+
         job = DBJob(
             user_id=user_id,
             url=str(data.url) if data.url else None,
             role_title=normalized.role_title,
             description_raw=raw_text,
-            description_normalized=normalized.model_dump(),
-            status="Imported"
+            description_normalized={
+                **normalized.model_dump(),
+                "_scrape": {
+                    "source": scrape_source,
+                    "error": scrape_error,
+                },
+            },
+            status="Imported",
         )
         self.db.add(job)
         await self.db.flush()
 
-        # Auto-create a Wishlist application for the Kanban tracker
-        self.db.add(DBApplication(
-            user_id=user_id,
-            job_id=job.id,
-            stage="Wishlist",
-            workflow_state={},
-        ))
+        self.db.add(
+            DBApplication(
+                user_id=user_id,
+                job_id=job.id,
+                stage="Wishlist",
+                workflow_state={"scrape_source": scrape_source},
+            )
+        )
 
         await self.db.commit()
         await self.db.refresh(job)

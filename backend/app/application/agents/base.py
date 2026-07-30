@@ -44,20 +44,24 @@ class OSAgent(ABC):
             mock_input_tokens = 120
             mock_output_tokens = 45
             
-            # Save to Postgres
+            # Save to Postgres (application_id must be a real applications.id)
             if application_id:
-                async with async_session() as session:
-                    log_entry = DBAgentEventLog(
-                        application_id=uuid.UUID(application_id),
-                        agent_name=self.name,
-                        action_type="execution",
-                        input_tokens=mock_input_tokens,
-                        output_tokens=mock_output_tokens,
-                        latency_ms=latency,
-                        evidence=result
-                    )
-                    session.add(log_entry)
-                    await session.commit()
+                try:
+                    async with async_session() as session:
+                        log_entry = DBAgentEventLog(
+                            application_id=uuid.UUID(application_id),
+                            agent_name=self.name,
+                            action_type="execution",
+                            input_tokens=mock_input_tokens,
+                            output_tokens=mock_output_tokens,
+                            latency_ms=latency,
+                            evidence=result
+                        )
+                        session.add(log_entry)
+                        await session.commit()
+                except Exception:
+                    # Demo workflows may pass a job_id that is not yet an application FK
+                    pass
             
             # Publish SUCCESS event
             await event_bus.publish("workflow_events", {
@@ -75,12 +79,32 @@ class OSAgent(ABC):
             return result
             
         except Exception as e:
+            latency = int((time.time() - start_time) * 1000)
+
+            # Persist error telemetry so Analytics success rates stay accurate
+            if application_id:
+                try:
+                    async with async_session() as session:
+                        session.add(DBAgentEventLog(
+                            application_id=uuid.UUID(application_id),
+                            agent_name=self.name,
+                            action_type="error",
+                            input_tokens=0,
+                            output_tokens=0,
+                            latency_ms=latency,
+                            evidence={"error": str(e)},
+                        ))
+                        await session.commit()
+                except Exception:
+                    pass
+
             # Publish ERROR event
             await event_bus.publish("workflow_events", {
                 "type": "AGENT_ERROR",
                 "node": self.name,
                 "application_id": application_id,
-                "error": str(e)
+                "error": str(e),
+                "latency_ms": latency,
             })
             print(f"[{self.name}] Error: {str(e)}")
             raise e

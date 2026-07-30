@@ -1,6 +1,7 @@
 "use client";
 
-import { Building2, GripVertical, ExternalLink } from "lucide-react";
+import Link from "next/link";
+import { Building2, GripVertical, ExternalLink, FileStack, Loader2, Workflow } from "lucide-react";
 
 export type ApplicationStage =
   | "Wishlist"
@@ -33,11 +34,22 @@ export interface Application {
 interface ApplicationCardProps {
   application: Application;
   onDragStart: (e: React.DragEvent, applicationId: string) => void;
+  onGeneratePackage?: (applicationId: string) => void;
+  packagingId?: string | null;
 }
 
-export function ApplicationCard({ application, onDragStart }: ApplicationCardProps) {
+export function ApplicationCard({
+  application,
+  onDragStart,
+  onGeneratePackage,
+  packagingId,
+}: ApplicationCardProps) {
   const job = application.job;
   const skills = job?.required_skills?.slice(0, 3) ?? [];
+  const busy = packagingId === application.id;
+  const pkg = application.workflow_state?.apply_package as
+    | { folder?: string; role_family?: string }
+    | undefined;
 
   return (
     <div
@@ -83,8 +95,43 @@ export function ApplicationCard({ application, onDragStart }: ApplicationCardPro
         </div>
       )}
 
-      <div className="pl-6 text-[10px] text-muted-foreground/70">
-        Updated {new Date(application.updated_at).toLocaleDateString()}
+      <div className="pl-6 flex items-center justify-between gap-2 flex-wrap">
+        <span className="text-[10px] text-muted-foreground/70 truncate min-w-0">
+          {pkg?.folder
+            ? `Package ready${pkg.role_family ? ` · ${pkg.role_family}` : ""}`
+            : `Updated ${new Date(application.updated_at).toLocaleDateString()}`}
+        </span>
+        <div className="flex items-center gap-1 shrink-0">
+          <Link
+            href={`/canvas?job_id=${encodeURIComponent(application.job_id)}`}
+            title="Run agent pipeline for this job on Canvas"
+            onClick={(e) => e.stopPropagation()}
+            draggable={false}
+            className="inline-flex items-center gap-1 text-[10px] px-1.5 py-1 rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+          >
+            <Workflow className="h-3 w-3" />
+            Canvas
+          </Link>
+          {onGeneratePackage && (
+            <button
+              type="button"
+              title="Write tailored resume + cover letter (DOCX/PDF) into company folder"
+              disabled={busy}
+              onClick={(e) => {
+                e.stopPropagation();
+                onGeneratePackage(application.id);
+              }}
+              className="inline-flex items-center gap-1 text-[10px] px-1.5 py-1 rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              {busy ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <FileStack className="h-3 w-3" />
+              )}
+              {busy ? "Packaging…" : "Package"}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

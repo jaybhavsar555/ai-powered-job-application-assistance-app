@@ -5,7 +5,7 @@ export function Timeline() {
   const { events, workflowStatus: status } = useWorkflowStore();
 
   return (
-    <div className="flex flex-col space-y-4 p-4 border border-border rounded-xl bg-card h-[600px] overflow-y-auto">
+    <div className="flex flex-col space-y-4 p-4 border border-border rounded-xl bg-card h-full min-h-[320px] overflow-y-auto os-scrollbar os-scrollbar-auto">
       <h3 className="font-semibold text-lg flex items-center gap-2">
         Execution Timeline
         {status === 'running' && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
@@ -24,10 +24,10 @@ export function Timeline() {
               )}
             </span>
             <div className="flex flex-col">
-              <span className="text-sm font-medium">{evt.agent || evt.type}</span>
+              <span className="text-sm font-medium">{evt.node || evt.agent || evt.type}</span>
               <span className="text-xs text-muted-foreground flex items-center gap-1 mt-2">
                 <Clock className="w-3 h-3" />
-                {new Date(evt.timestamp).toLocaleTimeString()}
+                {new Date(evt.timestamp || Date.now()).toLocaleTimeString()}
               </span>
             </div>
           </div>

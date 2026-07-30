@@ -1,6 +1,6 @@
-import os
 import yaml
 from pathlib import Path
+from typing import Optional
 
 class PromptRegistry:
     """
@@ -20,14 +20,14 @@ class PromptRegistry:
         md_path = self.prompts_dir / f"{agent_name}.md"
 
         if yaml_path.exists():
-            with open(yaml_path, 'r') as f:
+            with open(yaml_path, 'r', encoding='utf-8') as f:
                 data = yaml.safe_load(f)
                 prompt = data.get("system_prompt", "")
                 self._cache[agent_name] = prompt
                 return prompt
                 
         if md_path.exists():
-            with open(md_path, 'r') as f:
+            with open(md_path, 'r', encoding='utf-8') as f:
                 prompt = f.read()
                 self._cache[agent_name] = prompt
                 return prompt
@@ -35,5 +35,31 @@ class PromptRegistry:
         # Fallback empty prompt
         print(f"[PromptRegistry] Warning: No prompt found for {agent_name}")
         return "You are a helpful AI assistant."
+
+    def set_prompt(self, agent_name: str, prompt: str, *, persist: bool = True) -> str:
+        """Update in-memory prompt; optionally write back to YAML for local dev."""
+        cleaned = (prompt or "").strip()
+        if not cleaned:
+            raise ValueError("Prompt cannot be empty")
+        self._cache[agent_name] = cleaned
+        if persist:
+            yaml_path = self.prompts_dir / f"{agent_name}.yaml"
+            with open(yaml_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(
+                    {"system_prompt": cleaned},
+                    f,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                    sort_keys=False,
+                    width=100,
+                )
+        return cleaned
+
+    def invalidate(self, agent_name: Optional[str] = None) -> None:
+        if agent_name:
+            self._cache.pop(agent_name, None)
+        else:
+            self._cache.clear()
+
 
 prompt_registry = PromptRegistry()

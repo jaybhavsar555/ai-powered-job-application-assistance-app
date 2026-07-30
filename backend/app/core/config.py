@@ -17,9 +17,37 @@ class Settings(BaseSettings):
     # External Services
     REDIS_URL: str = "redis://localhost:6379/0"
     QDRANT_URL: str = "http://localhost:6333"
+
+    # LLM — dual profiles; switch at runtime via PUT /api/v1/llm/provider
+    # Boot default: openai | ollama | mock (empty = auto-detect from env)
+    LLM_PROVIDER: str = ""
     OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = ""  # leave empty for OpenAI cloud (legacy / boot hint)
+    OPENAI_MODEL: str = "gpt-4o"
+    LLM_MODEL: str = "gpt-4o"  # legacy alias; runtime uses provider-specific model
+    OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
+    OLLAMA_API_KEY: str = "ollama"
+    OLLAMA_MODEL: str = "qwen2.5:3b"
+    # Cap wait for local CPU Ollama; then agents use mocks
+    LLM_TIMEOUT_SECONDS: float = 45.0
+    LLM_MAX_TOKENS: int = 700
+    # Set true for instant Simulate demos (skip real LLM entirely)
+    LLM_FORCE_MOCK: bool = False
+
+    # LangGraph checkpoints: postgres (durable) | memory (process-local)
+    CHECKPOINT_BACKEND: str = "postgres"
+
+    # Embeddings / Vector memory (Qdrant)
+    # Local: docker compose exec ollama ollama pull nomic-embed-text
+    EMBEDDING_MODEL: str = "nomic-embed-text"
+    EMBEDDING_DIMS: int = 768
     
     ENVIRONMENT: str = "development"
+
+    # Local resume templates + where tailored application packages are written
+    RESUME_SOURCE_DIR: str = r"C:\Users\Asus\Downloads\resume based on JD"
+    # Empty = write company folders under RESUME_SOURCE_DIR
+    APPLICATION_PACKAGE_DIR: str = ""
 
     class Config:
         env_file = ".env"
