@@ -21,13 +21,15 @@ async def ingest_job(
     service = JobService(db)
     return await service.ingest_job(current_user.id, data)
 
-@router.get("/", response_model=List[JobResponse])
+@router.get("", response_model=List[JobResponse])
+@router.get("/", response_model=List[JobResponse], include_in_schema=False)
 async def list_jobs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     List all jobs tracked by the user.
+    Both /jobs and /jobs/ are registered so auth headers survive (no 307 redirect).
     """
     service = JobService(db)
     return await service.list_by_user(current_user.id)

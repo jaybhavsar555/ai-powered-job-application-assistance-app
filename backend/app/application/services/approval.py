@@ -161,6 +161,16 @@ class ApprovalService:
 
         state["approvals"] = approvals
         state["last_decision_at"] = now.isoformat()
+
+        both_approved = (
+            isinstance(approvals.get("cover_letter"), dict)
+            and approvals["cover_letter"].get("status") == "approved"
+            and isinstance(approvals.get("resume"), dict)
+            and approvals["resume"].get("status") == "approved"
+        )
+        if both_approved:
+            state["requires_human_approval"] = False
+
         app.workflow_state = state
 
         # Advance pipeline when at least one artifact is approved and none pending reject-all

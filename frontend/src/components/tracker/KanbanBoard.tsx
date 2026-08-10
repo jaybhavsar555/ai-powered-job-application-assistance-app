@@ -11,6 +11,9 @@ const STAGES: { stage: ApplicationStage; accent: string }[] = [
   { stage: "Wishlist", accent: "bg-slate-400" },
   { stage: "Researching", accent: "bg-sky-400" },
   { stage: "Ready", accent: "bg-emerald-400" },
+  { stage: "Needs input", accent: "bg-orange-400" },
+  { stage: "Failed", accent: "bg-rose-500" },
+  { stage: "Reapply", accent: "bg-cyan-500" },
   { stage: "Applied", accent: "bg-amber-400" },
   { stage: "Interview", accent: "bg-violet-400" },
   { stage: "Rejected", accent: "bg-red-400" },
@@ -73,13 +76,20 @@ export function KanbanBoard() {
     setMovingId(applicationId);
 
     try {
-      const { data } = await api.patch<Application>(
-        `/applications/${applicationId}/stage`,
-        { stage }
-      );
+      const { data } = await api.patch<
+        Application & {
+          follow_up?: { scheduled?: boolean; follow_up_due_at?: string; note?: string };
+        }
+      >(`/applications/${applicationId}/stage`, { stage });
       setApplications((prev) =>
         prev.map((a) => (a.id === applicationId ? data : a))
       );
+      if (stage === "Applied" && data.follow_up?.scheduled) {
+        setPackageMessage(
+          data.follow_up.note ||
+            `Marked Applied — follow-up draft queued for ~${data.follow_up.follow_up_due_at || "3 days"}.`
+        );
+      }
     } catch {
       // Revert on failure
       setApplications((prev) =>

@@ -1,14 +1,19 @@
-from fastapi import APIRouter, Depends, Body, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Body, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, Field
 from typing import Optional
 from uuid import UUID
+from pathlib import Path
+from urllib.parse import quote
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user, get_db
 from app.domain.models import User
 from app.application.services.document_generator import DocumentGenerator
 from app.application.services.apply_package import ApplyPackageService
+from app.core.config import get_settings
+from app.infrastructure.resume_library import extract_text
+from app.application.services.resume_studio import ResumeStudioService
 
 router = APIRouter()
 
@@ -82,3 +87,191 @@ async def create_apply_package(
         data.job_id,  # type: ignore[arg-type]
         company_override=data.company_name,
     )
+
+
+@router.get("/package-download")
+async def download_package_file(
+    application_id: UUID,
+    kind: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Stream DOCX/PDF from a successful apply package only (no invented files)."""
+    studio = ResumeStudioService(db)
+    path = await studio.resolve_package_file(current_user.id, application_id, kind)
+    media = {
+        "resume_pdf": "application/pdf",
+        "cover_pdf": "application/pdf",
+        "resume_docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "cover_docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }.get(kind, "application/octet-stream")
+    disposition = "inline" if kind.endswith("_pdf") else "attachment"
+    quoted = quote(path.name)
+    return FileResponse(
+        path,
+        media_type=media,
+        headers={
+            "Content-Disposition": f"{disposition}; filename=\"{path.name}\"; filename*=UTF-8''{quoted}",
+            "Cache-Control": "private, max-age=60",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get("/package-preview")
+async def package_file_preview(
+    application_id: UUID,
+    kind: str = "resume_pdf",
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Preview metadata for package resume/cover in the side panel before outreach send."""
+    studio = ResumeStudioService(db)
+    path = await studio.resolve_package_file(current_user.id, application_id, kind)
+    suffix = path.suffix.lower()
+    file_url = (
+        f"/api/v1/documents/package-download?application_id={application_id}&kind={quote(kind)}"
+    )
+    if suffix == ".pdf" or kind.endswith("_pdf"):
+        return {
+            "name": path.name,
+            "kind": "pdf",
+            "file_url": file_url,
+            "text": None,
+            "can_inline_preview": True,
+            "note": "This is the tailored package resume you’ll attach. Download if the viewer fails.",
+        }
+    try:
+        text = extract_text(path)[:20000]
+        note = "Formatted preview of the tailored package file."
+    except Exception as exc:
+        text = ""
+        note = f"Could not extract text ({exc}). Download instead."
+    return {
+        "name": path.name,
+        "kind": "docx" if suffix in {".docx", ".doc"} else "text",
+        "file_url": file_url,
+        "text": text,
+        "can_inline_preview": True,
+        "note": note,
+    }
+
+
+def _safe_library_path(filename: str) -> Path:
+    """Resolve a resume library filename under RESUME_SOURCE_DIR (no path traversal)."""
+    settings = get_settings()
+    root = Path(settings.RESUME_SOURCE_DIR).resolve()
+    name = Path(filename).name
+    if not name or name in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = (root / name).resolve()
+    if path != root and root not in path.parents:
+        raise HTTPException(status_code=403, detail="File outside resume library")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {name}")
+    return path
+
+
+@router.get("/library-file")
+async def stream_library_file(
+    name: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Stream a master template with inline disposition for PDFs (iframe-friendly)
+    and attachment for DOCX/other.
+    """
+    path = _safe_library_path(name)
+    suffix = path.suffix.lower()
+    media = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".doc": "application/msword",
+        ".txt": "text/plain",
+        ".md": "text/markdown",
+    }.get(suffix, "application/octet-stream")
+    disposition = "inline" if suffix == ".pdf" else "attachment"
+    quoted = quote(path.name)
+    return FileResponse(
+        path,
+        media_type=media,
+        headers={
+            "Content-Disposition": f"{disposition}; filename=\"{path.name}\"; filename*=UTF-8''{quoted}",
+            "Cache-Control": "private, max-age=60",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get("/library-preview")
+async def library_file_preview(
+    name: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Preview metadata for Resume Studio side panel.
+    PDF → use file stream URL in an iframe.
+    DOCX/TXT/MD → extracted text (browsers cannot render DOCX natively).
+    """
+    path = _safe_library_path(name)
+    suffix = path.suffix.lower()
+    file_url = f"/api/v1/documents/library-file?name={quote(path.name)}"
+
+    if suffix == ".pdf":
+        return {
+            "name": path.name,
+            "kind": "pdf",
+            "file_url": file_url,
+            "text": None,
+            "can_inline_preview": True,
+            "note": "PDF opens in the side panel; use Download if the viewer fails.",
+        }
+
+    if suffix in {".docx", ".doc", ".txt", ".md"}:
+        try:
+            text = extract_text(path)[:20000]
+            note = (
+                "Scaled to fit this panel. Download for exact Word layout."
+                if suffix in {".docx", ".doc"}
+                else "Text preview."
+            )
+        except Exception as exc:
+            text = ""
+            note = f"Could not extract text ({exc}). Download the file instead."
+        return {
+            "name": path.name,
+            "kind": "docx" if suffix in {".docx", ".doc"} else "text",
+            "file_url": file_url,
+            "text": text or "(No extractable text found in this file.)",
+            "can_inline_preview": True,
+            "note": note,
+        }
+
+    return {
+        "name": path.name,
+        "kind": "unsupported",
+        "file_url": file_url,
+        "text": None,
+        "can_inline_preview": False,
+        "note": "Preview not supported for this type — download instead.",
+    }
+
+
+@router.post("/upload")
+async def upload_document(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    import shutil
+
+    settings = get_settings()
+    source_dir = Path(settings.RESUME_SOURCE_DIR)
+    source_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_name = Path(file.filename or "upload.bin").name
+    file_path = source_dir / safe_name
+    with file_path.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    return {"status": "ok", "filename": safe_name, "url": f"/resumes/{safe_name}"}
+

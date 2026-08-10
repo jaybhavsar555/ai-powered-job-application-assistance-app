@@ -82,6 +82,12 @@ def _token_for(user: DBUser) -> TokenResponse:
 @router.get("/credentials", response_model=CredentialsResponse)
 async def list_dev_credentials():
     """Dev helper — seeded Phase 12 accounts (not for production)."""
+    settings = get_settings()
+    if not settings.demo_auth_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dev credentials are disabled outside development",
+        )
     return CredentialsResponse(
         note="Local seed accounts created on API startup. Register also creates role=user.",
         accounts=[
@@ -112,7 +118,9 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/login", response_model=TokenResponse)
 async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
-    await seed_phase12_users(db)
+    settings = get_settings()
+    if settings.seed_dev_users_enabled:
+        await seed_phase12_users(db)
     email = data.email.lower().strip()
     result = await db.execute(select(DBUser).where(DBUser.email == email))
     user = result.scalars().first()
@@ -138,6 +146,12 @@ async def me(current_user: User = Depends(get_current_user), db: AsyncSession = 
 @router.post("/demo", response_model=TokenResponse)
 async def demo_login(db: AsyncSession = Depends(get_db)):
     """Issue a JWT for local development and ensure seed users exist."""
+    settings = get_settings()
+    if not settings.demo_auth_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Demo login is disabled outside development",
+        )
     user = await ensure_demo_user(db)
     return _token_for(user)
 

@@ -39,6 +39,14 @@ class CoverLetterAgent(OSAgent):
         optimized_resume = state.get("optimized_resume", "{}")
         job_details = state.get("job_description", "")
         company_research = state.get("company_research", "No research found.")
+        memories = state.get("long_term_memory", [])
+        
+        memory_str = ""
+        if memories:
+            memory_str = "Relevant Memories from Vault:\n" + "\n".join(
+                f"- [{m.get('type', 'info')}] {m.get('title', '')}: {m.get('content', '')}" for m in memories
+            )
+
         system_prompt = prompt_registry.get_prompt(self.name)
 
         result = await structured_generate(
@@ -51,7 +59,8 @@ class CoverLetterAgent(OSAgent):
                         "Write a concise cover letter (max ~180 words, 3 short paragraphs).\n\n"
                         f"Resume:\n{_as_prompt_text(optimized_resume)}\n\n"
                         f"Job Details:\n{_as_prompt_text(job_details)}\n\n"
-                        f"Company Research:\n{_as_prompt_text(company_research)}"
+                        f"Company Research:\n{_as_prompt_text(company_research)}\n\n"
+                        f"{memory_str}"
                     ),
                 },
             ],

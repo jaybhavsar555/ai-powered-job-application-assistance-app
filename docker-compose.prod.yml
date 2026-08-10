@@ -49,12 +49,26 @@ services:
       QDRANT_URL: http://qdrant:6333
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://ollama:11434/v1}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-ollama}
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
       LLM_MODEL: ${LLM_MODEL:-qwen2.5:3b}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434/v1}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
       EMBEDDING_DIMS: ${EMBEDDING_DIMS:-768}
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
       ENVIRONMENT: production
+      ALLOW_DEMO_AUTH: "false"
+      SEED_DEV_USERS: "false"
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CHECKPOINT_BACKEND: postgres
+      RESUME_SOURCE_DIR: ${RESUME_SOURCE_DIR:-/data/resumes}
+      APPLICATION_PACKAGE_DIR: ${APPLICATION_PACKAGE_DIR:-/data/packages}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+    volumes:
+      - ${RESUME_HOST_DIR:-./data/resumes}:/data/resumes
     ports:
       - "${API_PORT:-8001}:8000"
     depends_on:
@@ -63,6 +77,8 @@ services:
       redis:
         condition: service_started
       qdrant:
+        condition: service_started
+      ollama:
         condition: service_started
     restart: unless-stopped
 

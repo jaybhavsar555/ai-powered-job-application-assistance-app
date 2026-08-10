@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,7 +39,9 @@ def detect_role_family(role_title: str, job_description: str = "") -> str:
         for kw in role["keywords"]:
             if kw.lower() in blob:
                 score += 2 if kw.lower() in role_title.lower() else 1
-        scores[role["id"]] = score
+        # Ensure role ID is treated as a string for dict key
+        role_id: str = role["id"]
+        scores[role_id] = score
     best = max(scores, key=scores.get)
     if scores[best] <= 0:
         return "fullstack"
@@ -102,11 +108,19 @@ def pick_base_resume(source_dir: Path, role_family: str) -> Optional[ResumeFile]
 def extract_text(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix == ".pdf":
-        from pypdf import PdfReader
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(str(path))
+            parts = [(page.extract_text() or "") for page in reader.pages]
+            return "\n".join(parts).strip()
+        except Exception as e:
+            logger.warning(f"Failed to extract PDF {path.name}: {e}")
+            # Fallback to raw binary read and decode as utf-8 ignoring errors
+            try:
+                return path.read_bytes().decode('utf-8', errors='ignore').strip()
+            except Exception:
+                return ""
 
-        reader = PdfReader(str(path))
-        parts = [(page.extract_text() or "") for page in reader.pages]
-        return "\n".join(parts).strip()
     if suffix == ".docx":
         from docx import Document
 

@@ -7,12 +7,22 @@ ensure_windows_selector_loop_policy()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from app.core.config import get_settings
 from app.core.logger import setup_logging
 from app.api.v1.api import api_router
 
 settings = get_settings()
 setup_logging()
+
+try:
+    settings.validate_for_boot()
+except RuntimeError as exc:
+    # Fail fast when ENVIRONMENT=production with unsafe secrets/CORS
+    raise SystemExit(f"[Config] {exc}") from exc
+
+origins = settings.cors_origin_list()
+allow_credentials = origins != ["*"]
 
 
 @asynccontextmanager
@@ -63,10 +73,16 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=origins,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+import os
+from pathlib import Path
+source_dir = Path(settings.RESUME_SOURCE_DIR)
+source_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static/resumes", StaticFiles(directory=str(source_dir)), name="resumes")
 
 app.include_router(api_router, prefix=settings.API_V1_STR)

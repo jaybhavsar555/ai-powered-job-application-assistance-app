@@ -13,7 +13,8 @@ from app.application.services.application import ApplicationService
 
 router = APIRouter()
 
-@router.get("/", response_model=List[ApplicationResponse])
+@router.get("", response_model=List[ApplicationResponse])
+@router.get("/", response_model=List[ApplicationResponse], include_in_schema=False)
 async def list_applications(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -22,7 +23,8 @@ async def list_applications(
     service = ApplicationService(db)
     return await service.list_by_user(current_user.id)
 
-@router.post("/", response_model=ApplicationResponse)
+@router.post("", response_model=ApplicationResponse)
+@router.post("/", response_model=ApplicationResponse, include_in_schema=False)
 async def create_application(
     data: ApplicationCreate,
     db: AsyncSession = Depends(get_db),

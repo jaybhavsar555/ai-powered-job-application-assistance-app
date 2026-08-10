@@ -6,6 +6,8 @@ from typing import List
 from fastapi import HTTPException
 from app.infrastructure.db.models import DBApplication, DBJob
 from app.schemas.application import ApplicationCreate, APPLICATION_STAGES
+from app.application.services.follow_up import schedule_follow_up_on_applied
+
 
 class ApplicationService:
     def __init__(self, db: AsyncSession):
@@ -115,7 +117,22 @@ class ApplicationService:
         if not app:
             raise HTTPException(status_code=404, detail="Application not found")
 
+        previous = app.stage
         app.stage = stage
         await self.db.commit()
         await self.db.refresh(app)
-        return self._to_response(app)
+
+        follow_up_meta = None
+        if stage == "Applied" and previous != "Applied":
+            follow_up_meta = await schedule_follow_up_on_applied(self.db, app)
+
+        result = await self.db.execute(
+            select(DBApplication)
+            .where(DBApplication.id == application_id, DBApplication.user_id == user_id)
+            .options(selectinload(DBApplication.job))
+        )
+        app = result.scalars().one()
+        payload = self._to_response(app)
+        if follow_up_meta:
+            payload["follow_up"] = follow_up_meta
+        return payload

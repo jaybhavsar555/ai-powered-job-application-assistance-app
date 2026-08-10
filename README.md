@@ -25,14 +25,15 @@ A local-first **AI Operating System** for job applications: multi-agent LangGrap
 
 ## Quick Start
 
-### 1. Infrastructure + local LLM
+### 1. Infrastructure + API in Docker (no local Python venv)
 ```bash
-docker compose up -d
+docker compose up -d --build
 docker compose exec ollama ollama pull qwen2.5:3b
-docker compose exec ollama ollama pull nomic-embed-text
 ```
 
-Services: Postgres `5432`, Redis `6379`, Qdrant `6333`, Ollama `11434`.
+Python packages live **inside the `api` image**. See [docs/docker_backend.md](docs/docker_backend.md).
+
+Services: API `8001`, Postgres `5432`, Redis `6379`, Qdrant `6333`, Ollama `11434`.
 
 ### 2. Environment
 ```bash

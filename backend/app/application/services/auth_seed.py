@@ -145,6 +145,13 @@ async def seed_phase12_users(db: AsyncSession) -> None:
 
 
 async def bootstrap_auth() -> None:
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    if not settings.seed_dev_users_enabled:
+        print("[Auth] Dev user seed skipped (production / SEED_DEV_USERS=false)")
+        return
+
     async with async_session() as db:
         try:
             await seed_phase12_users(db)

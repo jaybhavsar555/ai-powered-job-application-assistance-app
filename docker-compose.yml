@@ -51,6 +51,39 @@ services:
               count: all
               capabilities: [gpu]
 
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    # Hot-reload against bind-mounted source (packages stay in the image — no local venv)
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend:/app
+      # Host resume library ↔ container (packages written back to your Downloads folder)
+      - "C:\\Users\\Asus\\Downloads\\resume based on JD:/data/resumes"
+      - "./data/packages:/data/packages"
+    environment:
+      # Docker DNS names (override localhost values from backend/.env)
+      DATABASE_URL: postgresql+asyncpg://user:password@db:5432/aijobdb
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      OLLAMA_BASE_URL: http://ollama:11434/v1
+      RESUME_SOURCE_DIR: /data/resumes
+      APPLICATION_PACKAGE_DIR: /data/packages
+      ENVIRONMENT: development
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      CHECKPOINT_BACKEND: postgres
+    env_file:
+      - ./backend/.env
+    ports:
+      - "8001:8000"
+    depends_on:
+      - db
+      - redis
+      - qdrant
+      - ollama
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:

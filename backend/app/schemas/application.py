@@ -7,6 +7,9 @@ APPLICATION_STAGES = [
     "Wishlist",
     "Researching",
     "Ready",
+    "Needs input",
+    "Failed",
+    "Reapply",
     "Applied",
     "Interview",
     "Rejected",
@@ -17,7 +20,10 @@ class ApplicationCreate(BaseModel):
     stage: str = "Wishlist"
 
 class ApplicationStageUpdate(BaseModel):
-    stage: str = Field(..., description="Wishlist | Researching | Ready | Applied | Interview | Rejected")
+    stage: str = Field(
+        ...,
+        description="Wishlist | Researching | Ready | Needs input | Failed | Reapply | Applied | Interview | Rejected",
+    )
 
 class JobSummary(BaseModel):
     id: UUID
@@ -39,6 +45,7 @@ class ApplicationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     job: Optional[JobSummary] = None
+    follow_up: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True

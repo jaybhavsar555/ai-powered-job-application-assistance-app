@@ -6,5 +6,5 @@ description: 'Marketplace agent that turns ATS missing skills into a short learn
   '
 version: 0.1.0
 author: career-os
-enabled: false
+enabled: true
 entry: app.marketplace.plugins.skill_gap_agent

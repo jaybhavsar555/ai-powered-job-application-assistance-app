@@ -79,7 +79,7 @@ class DBApplication(Base, DBBase):
     __tablename__ = "applications"
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"))
     job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), unique=True)
-    stage = Column(String, default="Wishlist") # Wishlist, Researching, Ready, Applied, Interview, Rejected
+    stage = Column(String, default="Wishlist")  # Wishlist…Needs input/Failed/Reapply…Applied…
     workflow_state = Column(JSONB, default=dict)
     
     job = relationship("DBJob", back_populates="application")
@@ -124,3 +124,4 @@ class DBMessage(Base, DBBase):
     status = Column(String, default="Draft")
     
     application = relationship("DBApplication", back_populates="messages")
+    recruiter = relationship("DBRecruiter")

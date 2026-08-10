@@ -153,7 +153,7 @@ export default function ApprovalsPage() {
 
   if (workflowStatus !== "completed" || !finalState) {
     return (
-      <div className="flex-1 p-8 space-y-6">
+      <div className="flex-1 p-4 md:p-8 space-y-6">
         <div className="flex justify-between items-center">
           <h1 className="text-3xl font-bold tracking-tight">Human-in-the-Loop Approvals</h1>
         </div>
@@ -172,7 +172,7 @@ export default function ApprovalsPage() {
   }
 
   return (
-    <div className="flex-1 p-8 space-y-6 overflow-y-auto os-scrollbar os-scrollbar-auto">
+    <div className="flex-1 p-4 md:p-8 space-y-6 overflow-y-auto os-scrollbar os-scrollbar-auto">
       <div className="flex justify-between items-center gap-3 flex-wrap">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Pending Approvals</h1>

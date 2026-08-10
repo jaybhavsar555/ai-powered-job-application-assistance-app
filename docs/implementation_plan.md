@@ -44,18 +44,18 @@ Living status for Career OS. **Phases 0–17 are complete.** See [walkthrough.md
 - [ ] Kubernetes manifests / Helm
 - [ ] Paid marketplace / signed plugin packages
 
-### Product layer (not started) — Simple Mode / Career Inbox
+### Product layer — Simple Mode / Career Inbox
 
-The agent workspace (Phases 0–17) is the **Advanced Workspace**. The daily job-seeker product is a **second layer on top** — do not remove Canvas/Vault/Tracker.
+See **[antigravity_review_and_prod_path.md](./antigravity_review_and_prod_path.md)** (2026-08-10 review) and [product_simple_mode_roadmap.md](./product_simple_mode_roadmap.md).
 
-Full gap analysis + phased plan: **[product_simple_mode_roadmap.md](./product_simple_mode_roadmap.md)**
+Antigravity scaffolded Simple Mode pages + recruiter/outreach agents. PR A–D harden the path:
 
-- [ ] **Phase 18** — Shell modes + Career Inbox (`/inbox`, `GET /inbox/summary`)
-- [ ] **Phase 19** — Jobs page (import + cards; optional auto-Simulate)
-- [ ] **Phase 20** — Resume Studio (diff, versions, ATS, download)
-- [ ] **Phase 21** — Companies & Recruiters pages (use existing DB stubs)
-- [ ] **Phase 22** — Outreach drafts + follow-ups (approve / copy / mark sent)
-- [ ] **Phase 23** — Pipeline extensions (recruiter node, richer stages, auto-start)
+- [x] **Phase 18** — Shell modes + Career Inbox (UI + `/inbox/summary` with `next_action`)
+- [x] **Phase 19** — Jobs + Discovery (ingest to Wishlist; Playwright scrape in Docker)
+- [x] **Phase 20** — Resume Studio (`/resumes/studio`, package downloads, no mock ATS)
+- [x] **Phase 21** — Companies & Recruiters (user-scoped APIs + graph → DB persist)
+- [x] **Phase 22** — Outreach drafts persisted as `DBMessage` Drafts after Simulate
+- [x] **Phase 23** — Honest stubs (AutoApplyBot; demo auth off in prod; LLM mock telemetry)
 - [ ] **Phase 24** — OAuth email, extension ingest, deep analytics, vault graph UI
 
 ## API surface (implemented)

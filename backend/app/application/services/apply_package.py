@@ -40,17 +40,42 @@ class ApplyPackageService:
         if not path.exists():
             raise HTTPException(
                 status_code=400,
-                detail=f"Resume source folder not found: {path}",
+                detail=(
+                    f"Resume source folder not found: {path}. "
+                    "Put PDF/DOCX templates there or set RESUME_SOURCE_DIR."
+                ),
             )
         return path
+
+    def _package_root(self) -> Path:
+        raw = (self.settings.APPLICATION_PACKAGE_DIR or "").strip()
+        if not raw:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "APPLICATION_PACKAGE_DIR is not set. "
+                    "Set it to a writable folder (e.g. ./data/packages) so "
+                    "tailored packages do not pollute the resume library."
+                ),
+            )
+        root = Path(raw)
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot create package directory {root}: {e}",
+            ) from e
+        return root
 
     def library_status(self) -> dict[str, Any]:
         source = Path(self.settings.RESUME_SOURCE_DIR)
         files = list_resume_files(source) if source.exists() else []
+        out = (self.settings.APPLICATION_PACKAGE_DIR or "").strip() or None
         return {
             "source_dir": str(source),
             "exists": source.exists(),
-            "output_dir": self.settings.APPLICATION_PACKAGE_DIR or str(source),
+            "output_dir": out,
             "files": [
                 {
                     "name": f.name,
@@ -165,13 +190,14 @@ class ApplyPackageService:
         bullets = optimized.get("tailored_bullets") or []
         keywords = optimized.get("added_keywords") or missing
 
-        out_root = Path(self.settings.APPLICATION_PACKAGE_DIR or str(source))
+        out_root = self._package_root()
         folder_name = slugify(str(company))
         package_dir = out_root / folder_name
         package_dir.mkdir(parents=True, exist_ok=True)
 
         role_slug = slugify(str(role_title), fallback=role_family)
-        stem = f"Jay_Padmakar_Bhavsar_{folder_name}_{role_slug}"
+        name_slug = slugify(user_name or "Candidate", fallback="Candidate")
+        stem = f"{name_slug}_{folder_name}_{role_slug}"
         paths = {
             "resume_docx": package_dir / f"{stem}_Resume.docx",
             "resume_pdf": package_dir / f"{stem}_Resume.pdf",

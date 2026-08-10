@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Career OS Autofill</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        width: 340px;
+        margin: 0;
+        padding: 14px;
+        color: #0f172a;
+        background: #f8fafc;
+      }
+      h1 { font-size: 14px; margin: 0 0 6px; }
+      p { font-size: 11px; color: #64748b; margin: 0 0 10px; line-height: 1.4; }
+      label { display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px; }
+      input[type="text"], input[type="password"], input[type="email"] {
+        width: 100%; box-sizing: border-box; margin-bottom: 8px;
+        padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px;
+      }
+      .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; font-size: 12px; }
+      button {
+        width: 100%; border: 0; border-radius: 6px; padding: 8px;
+        font-size: 12px; font-weight: 600; cursor: pointer; margin-bottom: 6px;
+      }
+      .primary { background: #0f766e; color: #fff; }
+      .secondary { background: #e2e8f0; color: #0f172a; }
+      .warn { background: #b45309; color: #fff; }
+      #status { font-size: 11px; margin-top: 6px; min-height: 1.2em; }
+      .ok { color: #047857; }
+      .err { color: #b91c1c; }
+      details { margin-bottom: 8px; font-size: 11px; }
+      summary { cursor: pointer; font-weight: 600; margin-bottom: 6px; }
+    </style>
+  </head>
+  <body>
+    <h1>Career OS · Apply helper</h1>
+    <p>
+      Quality-first: tailored resume + outreach, then form fill.
+      LinkedIn is never auto-submitted.
+    </p>
+    <label for="apiBase">API base</label>
+    <input id="apiBase" type="text" placeholder="http://localhost:8001/api/v1" />
+    <label for="email">Email</label>
+    <input id="email" type="email" placeholder="you@example.com" autocomplete="username" />
+    <label for="password">Password</label>
+    <input id="password" type="password" placeholder="••••••••" autocomplete="current-password" />
+    <button class="primary" id="login">Log in &amp; save token</button>
+    <details>
+      <summary>Or paste JWT manually</summary>
+      <label for="token">Bearer token</label>
+      <input id="token" type="password" placeholder="JWT from Career OS login" />
+      <button class="secondary" id="save">Save token / prefs</button>
+    </details>
+    <div class="row">
+      <input id="consent" type="checkbox" />
+      <label for="consent" style="margin:0;font-weight:500">
+        I consent to Auto Apply (Submit when confidence high)
+      </label>
+    </div>
+    <button class="secondary" id="fill">Fill (Review — you Submit)</button>
+    <button class="warn" id="auto">Fill + Auto Submit (gated)</button>
+    <button class="secondary" id="test">Test profile</button>
+    <div id="status"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>

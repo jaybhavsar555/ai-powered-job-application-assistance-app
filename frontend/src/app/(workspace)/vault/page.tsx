@@ -1,7 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Database, Search, Plus, Sparkles, RefreshCw, Globe, ExternalLink, Loader2 } from "lucide-react";
+import Link from "next/link";
+import {
+  Database,
+  Search,
+  Plus,
+  Sparkles,
+  RefreshCw,
+  Globe,
+  ExternalLink,
+  Loader2,
+  Import,
+} from "lucide-react";
 import api, { getApiErrorMessage } from "@/lib/api";
 
 interface WikiEntity {
@@ -142,12 +153,12 @@ export default function VaultPage() {
   const others = filteredLocal.filter((e) => e.entity_type !== "job_portal");
 
   return (
-    <div className="flex-1 p-8 space-y-6 overflow-y-auto">
+    <div className="flex-1 p-4 md:p-8 space-y-6 overflow-y-auto">
       <div className="flex justify-between items-center gap-3 flex-wrap">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Knowledge Graph Vault</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Long-term memory, job portals, and Qdrant semantic search
+            Long-term memory and job-portal bookmarks — not auto-scrapers
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -180,6 +191,30 @@ export default function VaultPage() {
           {notice}
         </div>
       )}
+
+      <div className="rounded-xl border bg-muted/20 px-4 py-3 text-sm space-y-1">
+        <p className="font-medium">How to use portals</p>
+        <p className="text-muted-foreground">
+          Open a portal → search → copy the job posting URL → Import on Jobs.
+          Per-site scrapers are not supported (boards block bots). Discovery still
+          pulls Remotive matches separately.
+        </p>
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Link
+            href="/jobs?import=1"
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium"
+          >
+            <Import className="w-3.5 h-3.5" />
+            Import job URL
+          </Link>
+          <Link
+            href="/discovery"
+            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted"
+          >
+            Or use Discovery
+          </Link>
+        </div>
+      </div>
 
       {showAdd && (
         <form
@@ -304,7 +339,7 @@ export default function VaultPage() {
                   return (
                     <div
                       key={entity.id}
-                      className="border border-border bg-card rounded-lg p-4 space-y-2 hover:border-primary/50 transition-colors"
+                      className="border border-border bg-card rounded-lg p-4 space-y-3 hover:border-primary/50 transition-colors"
                     >
                       <div className="flex justify-between items-start gap-2">
                         <span className="text-xs font-semibold px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 capitalize">
@@ -316,20 +351,34 @@ export default function VaultPage() {
                       </div>
                       <h4 className="font-medium text-foreground">{entity.title}</h4>
                       {url ? (
-                        <a
-                          href={url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-sm text-primary hover:underline break-all"
-                        >
+                        <p className="text-xs text-muted-foreground truncate" title={url}>
                           {url.replace(/^https?:\/\//, "")}
-                          <ExternalLink className="w-3 h-3 shrink-0" />
-                        </a>
+                        </p>
                       ) : (
                         <p className="text-sm text-muted-foreground line-clamp-2">
                           {JSON.stringify(entity.content).replace(/["{}]/g, " ")}
                         </p>
                       )}
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {url && (
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            Open portal
+                          </a>
+                        )}
+                        <Link
+                          href="/jobs?import=1"
+                          className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
+                        >
+                          <Import className="w-3.5 h-3.5" />
+                          Import job URL
+                        </Link>
+                      </div>
                     </div>
                   );
                 })}

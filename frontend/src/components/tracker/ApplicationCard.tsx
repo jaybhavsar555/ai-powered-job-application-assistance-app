@@ -7,6 +7,9 @@ export type ApplicationStage =
   | "Wishlist"
   | "Researching"
   | "Ready"
+  | "Needs input"
+  | "Failed"
+  | "Reapply"
   | "Applied"
   | "Interview"
   | "Rejected";

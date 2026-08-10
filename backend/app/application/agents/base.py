@@ -17,13 +17,13 @@ class OSAgent(ABC):
     capabilities: List[str] = [] # e.g., 'web', 'db', 'terminal'
 
     @abstractmethod
-    async def run(self, state: Dict[str, Any], *args, **kwargs) -> Dict[str, Any]:
+    async def run(self, state: Any, *args, **kwargs) -> Dict[str, Any]:
         """
         The core execution logic of the agent. Must return a dict to update LangGraph state.
         """
         pass
 
-    async def execute(self, state: Dict[str, Any], application_id: Optional[str] = None) -> Dict[str, Any]:
+    async def execute(self, state: Any, application_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Wrapper around `run` that calculates telemetry (latency, tokens) and handles errors.
         In Phase 5, this will emit to Redis Event Bus.

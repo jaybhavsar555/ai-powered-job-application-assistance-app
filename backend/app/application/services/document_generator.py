@@ -1,14 +1,14 @@
 import io
 import re
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt
-from reportlab.lib.pagesizes import LETTER
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import inch
-from reportlab.platypus import ListFlowable, ListItem, Paragraph, SimpleDocTemplate, Spacer
+from reportlab.lib.pagesizes import LETTER  # type: ignore
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet  # type: ignore
+from reportlab.lib.units import inch  # type: ignore
+from reportlab.platypus import ListFlowable, ListItem, Paragraph, SimpleDocTemplate, Spacer  # type: ignore
 
 
 class DocumentGenerator:
@@ -84,6 +84,93 @@ class DocumentGenerator:
         skills: Optional[list[str]] = None,
         base_excerpt: Optional[str] = None,
     ) -> io.BytesIO:
+        """Prefer LaTeX (ATS-friendly single-column PDF); fall back to ReportLab."""
+        try:
+            return self._generate_resume_pdf_latex(
+                user_name, contact_info, summary, bullets, skills, base_excerpt
+            )
+        except Exception as exc:
+            print(f"[DocumentGenerator] LaTeX resume PDF failed ({exc}); using ReportLab fallback")
+            return self._generate_resume_pdf_reportlab(
+                user_name, contact_info, summary, bullets, skills, base_excerpt
+            )
+
+    def _generate_resume_pdf_latex(
+        self,
+        user_name: str,
+        contact_info: str,
+        summary: str,
+        bullets: list[str],
+        skills: Optional[list[str]] = None,
+        base_excerpt: Optional[str] = None,
+    ) -> io.BytesIO:
+        import os
+        import shutil
+        import subprocess
+        import tempfile
+
+        from jinja2 import Template
+
+        if not shutil.which("pdflatex"):
+            raise RuntimeError("pdflatex not found on PATH")
+
+        template_path = os.path.join(
+            os.path.dirname(__file__), "..", "templates", "resume_template.tex"
+        )
+        with open(template_path, "r", encoding="utf-8") as f:
+            template_str = f.read()
+
+        template = Template(template_str)
+        tex_content = template.render(
+            user_name=self._escape_latex(user_name),
+            contact_info=self._escape_latex(contact_info or ""),
+            summary=self._escape_latex(summary or ""),
+            bullets=[self._escape_latex(b) for b in (bullets or [])],
+            skills=self._escape_latex(", ".join(skills) if skills else ""),
+            base_excerpt_blocks=[
+                self._escape_latex(b) for b in self._split_blocks(base_excerpt, limit=10)
+            ]
+            if base_excerpt
+            else [],
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tex_file = os.path.join(temp_dir, "resume.tex")
+            with open(tex_file, "w", encoding="utf-8") as f:
+                f.write(tex_content)
+
+            # Two passes help hyperref/refs settle for cleaner ATS-parseable PDFs
+            for _ in range(2):
+                result = subprocess.run(
+                    ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "resume.tex"],
+                    cwd=temp_dir,
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                if result.returncode != 0:
+                    err = (result.stderr or result.stdout or b"").decode("utf-8", errors="ignore")
+                    raise RuntimeError(f"pdflatex failed: {err[-2000:]}")
+
+            pdf_file = os.path.join(temp_dir, "resume.pdf")
+            if not os.path.exists(pdf_file):
+                raise RuntimeError("pdflatex completed but resume.pdf was not produced")
+            with open(pdf_file, "rb") as f:
+                pdf_data = f.read()
+
+        stream = io.BytesIO(pdf_data)
+        stream.seek(0)
+        return stream
+
+    def _generate_resume_pdf_reportlab(
+        self,
+        user_name: str,
+        contact_info: str,
+        summary: str,
+        bullets: list[str],
+        skills: Optional[list[str]] = None,
+        base_excerpt: Optional[str] = None,
+    ) -> io.BytesIO:
         stream = io.BytesIO()
         doc = SimpleDocTemplate(
             stream,
@@ -102,45 +189,48 @@ class DocumentGenerator:
             spaceAfter=6,
         )
         contact = ParagraphStyle(
-            "Contact",
+            "ResumeContact",
             parent=styles["Normal"],
             fontSize=9,
             alignment=1,
-            spaceAfter=14,
+            spaceAfter=12,
         )
         heading = ParagraphStyle(
-            "Section",
+            "ResumeH",
             parent=styles["Heading2"],
             fontSize=12,
             spaceBefore=10,
             spaceAfter=6,
         )
-        body = ParagraphStyle("Body", parent=styles["Normal"], fontSize=10, leading=13)
+        body = ParagraphStyle("ResumeBody", parent=styles["Normal"], fontSize=10, leading=13, spaceAfter=6)
 
-        story = [
-            Paragraph(self._escape(user_name.upper()), title),
-            Paragraph(self._escape(contact_info or ""), contact),
-        ]
+        story: List[Any] = [Paragraph(self._escape(user_name.upper()), title)]
+        if contact_info:
+            story.append(Paragraph(self._escape(contact_info), contact))
         if summary:
             story.append(Paragraph("Professional Summary", heading))
             story.append(Paragraph(self._escape(summary), body))
-            story.append(Spacer(1, 6))
         if bullets:
-            story.append(Paragraph("Key Achievements & Experience", heading))
-            items = [ListItem(Paragraph(self._escape(b), body)) for b in bullets]
-            story.append(ListFlowable(items, bulletType="bullet", leftIndent=12))
+            story.append(Paragraph("Experience", heading))
+            items = [
+                ListItem(Paragraph(self._escape(b), body), leftIndent=12, bulletColor="black")
+                for b in bullets
+                if b
+            ]
+            if items:
+                story.append(ListFlowable(items, bulletType="bullet", start="•"))
         if skills:
-            story.append(Paragraph("Highlighted Skills", heading))
+            story.append(Paragraph("Skills", heading))
             story.append(Paragraph(self._escape(", ".join(skills)), body))
         if base_excerpt:
-            story.append(Paragraph("Supporting Experience (from base resume)", heading))
-            for block in self._split_blocks(base_excerpt, limit=10):
+            story.append(Paragraph("Additional Experience", heading))
+            for block in self._split_blocks(base_excerpt, limit=12):
                 story.append(Paragraph(self._escape(block), body))
-                story.append(Spacer(1, 4))
 
         doc.build(story)
         stream.seek(0)
         return stream
+
 
     def generate_cover_letter_pdf(self, user_name: str, content: str) -> io.BytesIO:
         stream = io.BytesIO()
@@ -154,7 +244,10 @@ class DocumentGenerator:
         )
         styles = getSampleStyleSheet()
         body = ParagraphStyle("CLBody", parent=styles["Normal"], fontSize=11, leading=15, spaceAfter=10)
-        story = [Paragraph(self._escape(p), body) for p in self._paragraphs(content)]
+        story: List[Any] = []
+        for p in self._paragraphs(content):
+            story.append(Paragraph(self._escape(p), body))
+            
         if user_name and user_name.lower() not in content.lower():
             story.append(Spacer(1, 12))
             story.append(Paragraph(self._escape(user_name), body))
@@ -170,6 +263,18 @@ class DocumentGenerator:
             .replace("<", "&lt;")
             .replace(">", "&gt;")
         )
+
+    @staticmethod
+    def _escape_latex(text: str) -> str:
+        if not text:
+            return ""
+        escaped = text.replace('\\', '\\textbackslash{}')
+        escaped = escaped.replace('{', '\\{').replace('}', '\\}')
+        escaped = escaped.replace('$', '\\$').replace('&', '\\&')
+        escaped = escaped.replace('%', '\\%').replace('#', '\\#')
+        escaped = escaped.replace('_', '\\_')
+        escaped = escaped.replace('~', '\\textasciitilde{}').replace('^', '\\textasciicircum{}')
+        return escaped
 
     @staticmethod
     def _paragraphs(content: str) -> List[str]:

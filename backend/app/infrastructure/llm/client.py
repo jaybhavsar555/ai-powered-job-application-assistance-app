@@ -16,6 +16,11 @@ import instructor
 from openai import AsyncOpenAI
 
 from app.infrastructure.llm.runtime import get_llm_runtime
+from app.infrastructure.llm.telemetry import (
+    record_llm_call,
+    record_llm_success,
+    record_mock_fallback,
+)
 
 
 @lru_cache()
@@ -107,15 +112,22 @@ async def structured_generate(response_model, messages, *, fallback, max_tokens:
     """
     Run Instructor structured generation. On missing model / Ollama errors / timeout,
     return the fallback instance so workflows stay demoable on CPU-only hosts.
+    Every mock path is logged + counted (`llm_mock_fallback` telemetry).
     """
     cfg = get_llm_runtime()
+    record_llm_call()
+
     if cfg.force_mock:
-        print(f"[LLM] provider=mock — using mock")
+        record_mock_fallback(reason="force_mock", provider=cfg.provider, model=cfg.model)
         return fallback() if callable(fallback) else fallback
 
     client = get_instructor_client()
     if client is None:
-        print(f"[LLM] provider={cfg.provider} not configured — using mock")
+        record_mock_fallback(
+            reason="provider_not_configured",
+            provider=cfg.provider,
+            model=cfg.model,
+        )
         return fallback() if callable(fallback) else fallback
 
     model = cfg.model
@@ -124,7 +136,6 @@ async def structured_generate(response_model, messages, *, fallback, max_tokens:
     if cfg.provider == "ollama":
         token_budget = min(token_budget, cfg.max_tokens)
 
-    # Local models: nudge shorter answers so CPU generation finishes sooner.
     call_messages = list(messages)
     if cfg.provider == "ollama" and call_messages:
         speed_hint = (
@@ -158,14 +169,21 @@ async def structured_generate(response_model, messages, *, fallback, max_tokens:
             f"[LLM] provider={cfg.provider} model={model} "
             f"max_tokens={token_budget} timeout={timeout}s"
         )
-        return await asyncio.wait_for(
+        result = await asyncio.wait_for(
             client.chat.completions.create(**create_kwargs),
             timeout=timeout,
         )
+        record_llm_success()
+        return result
     except asyncio.TimeoutError:
-        print(f"[LLM] provider={cfg.provider} model={model} timed out after {timeout}s — falling back to mock")
+        record_mock_fallback(reason="timeout", provider=cfg.provider, model=model)
         return fallback() if callable(fallback) else fallback
     except Exception as exc:
+        record_mock_fallback(
+            reason=type(exc).__name__,
+            provider=cfg.provider,
+            model=model,
+        )
         print(
             f"[LLM] provider={cfg.provider} model={model} "
             f"Falling back to mock ({type(exc).__name__}: {exc})"

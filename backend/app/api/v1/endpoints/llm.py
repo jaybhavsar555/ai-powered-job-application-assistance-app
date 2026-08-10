@@ -7,6 +7,7 @@ from app.api.dependencies import get_current_user
 from app.domain.models import User
 from app.infrastructure.llm.client import warm_ollama_model
 from app.infrastructure.llm.runtime import runtime_status, set_llm_provider
+from app.infrastructure.llm.telemetry import telemetry_snapshot
 
 router = APIRouter()
 
@@ -22,7 +23,13 @@ class LlmProviderUpdate(BaseModel):
 @router.get("/provider")
 async def get_llm_provider(current_user: User = Depends(get_current_user)):
     """Current LLM provider used by Canvas / agents."""
-    return runtime_status()
+    return {**runtime_status(), "telemetry": telemetry_snapshot()}
+
+
+@router.get("/telemetry")
+async def get_llm_telemetry(current_user: User = Depends(get_current_user)):
+    """Mock-fallback counters — when agents silently used fallback JSON."""
+    return telemetry_snapshot()
 
 
 @router.put("/provider")

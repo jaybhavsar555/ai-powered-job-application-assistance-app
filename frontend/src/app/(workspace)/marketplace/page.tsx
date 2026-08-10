@@ -54,7 +54,7 @@ export default function MarketplacePage() {
   };
 
   return (
-    <div className="flex-1 p-8 space-y-6 overflow-y-auto">
+    <div className="flex-1 p-4 md:p-8 space-y-6 overflow-y-auto">
       <div className="flex justify-between items-center gap-3 flex-wrap">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Agent Marketplace</h1>

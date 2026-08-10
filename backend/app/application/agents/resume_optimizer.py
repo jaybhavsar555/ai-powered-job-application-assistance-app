@@ -32,6 +32,14 @@ class ResumeOptimizerAgent(OSAgent):
         base_resume = state.get("resume_json", "{}")
         missing_skills = state.get("ats_score", {}).get("missing_skills", [])
         job_details = state.get("job_description", "")
+        memories = state.get("long_term_memory", [])
+        
+        memory_str = ""
+        if memories:
+            memory_str = "Relevant Memories from Vault:\n" + "\n".join(
+                f"- [{m['type']}] {m['title']}: {m['content']}" for m in memories
+            )
+
         system_prompt = prompt_registry.get_prompt(self.name)
 
         result = await structured_generate(
@@ -43,6 +51,7 @@ class ResumeOptimizerAgent(OSAgent):
                     "content": (
                         f"Base Resume:\n{(base_resume or '')[:1200]}\n\n"
                         f"Missing ATS Skills:\n{', '.join(missing_skills)}\n\n"
+                        f"{memory_str}\n\n"
                         f"Job Details:\n{(job_details or '')[:1800]}"
                     ),
                 },

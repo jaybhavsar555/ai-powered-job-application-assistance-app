@@ -1,0 +1,54 @@
+% ATS-oriented single-column resume (standard section names, minimal chrome)
+\documentclass[11pt,letterpaper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=0.6in]{geometry}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{hyperref}
+\usepackage{lmodern}
+
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+
+\titleformat{\section}{\large\bfseries\uppercase}{}{0em}{}[\vspace{2pt}\titlerule\vspace{4pt}]
+\titlespacing{\section}{0pt}{10pt}{4pt}
+
+\begin{document}
+
+\begin{center}
+{\LARGE\textbf{ {{- user_name -}} }}\\[4pt]
+{\small {{- contact_info -}} }
+\end{center}
+
+{% if summary %}
+\section*{Professional Summary}
+{{ summary }}
+{% endif %}
+
+{% if bullets %}
+\section*{Experience}
+\begin{itemize}[leftmargin=*,itemsep=3pt,parsep=0pt,topsep=2pt]
+{% for bullet in bullets %}
+  \item {{ bullet }}
+{% endfor %}
+\end{itemize}
+{% endif %}
+
+{% if base_excerpt_blocks %}
+\section*{Additional Experience}
+\begin{itemize}[leftmargin=*,itemsep=3pt,parsep=0pt,topsep=2pt]
+{% for block in base_excerpt_blocks %}
+  \item {{ block }}
+{% endfor %}
+\end{itemize}
+{% endif %}
+
+{% if skills %}
+\section*{Skills}
+{{ skills }}
+{% endif %}
+
+\end{document}

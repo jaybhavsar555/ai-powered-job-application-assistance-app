@@ -1,10 +1,11 @@
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 from datetime import datetime
 
 class JobCreate(BaseModel):
-    url: Optional[HttpUrl] = None
+    # Plain str so relative / scrapy junk can be normalized in JobService
+    url: Optional[str] = Field(default=None, max_length=2000)
     role_title: Optional[str] = None
     description_raw: Optional[str] = None
     company_name: Optional[str] = None

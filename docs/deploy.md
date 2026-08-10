@@ -4,7 +4,7 @@
 
 ```bash
 cp .env.production.example .env.production
-# Edit POSTGRES_PASSWORD, REDIS_PASSWORD, SECRET_KEY
+# Edit POSTGRES_PASSWORD, REDIS_PASSWORD, SECRET_KEY (>=32 chars), CORS_ORIGINS
 
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 
@@ -15,7 +15,7 @@ docker compose -f docker-compose.prod.yml exec ollama ollama pull nomic-embed-te
 
 - API: `http://localhost:8001` (or `API_PORT`)
 - Web: `http://localhost:3000` (or `WEB_PORT`)
-- Register at `/login` or use **Continue as demo**
+- Register at `/login` (demo login is **off** in production)
 
 ## Secrets checklist
 
@@ -39,7 +39,19 @@ Do **not** commit `.env.production`.
 ## Auth
 
 - `POST /api/v1/auth/register` / `login` — real email/password  
-- `POST /api/v1/auth/demo` — still available for local smoke tests  
+- **Production:** `/auth/demo` and `/auth/credentials` are **disabled** (`ALLOW_DEMO_AUTH=false`)  
+- **Production:** demo password seeding is **skipped** (`SEED_DEV_USERS=false`) — register real users  
+- Dev compose still seeds admin/demo/user for local smoke  
+
+## CORS & secrets
+
+- Set `CORS_ORIGINS` to your real frontend origin(s) (comma-separated). Production refuses `*` and weak `SECRET_KEY`.  
+- Optional SMTP: leave `SMTP_HOST` empty → outreach uses **copy/mailto** (message stays Draft).  
+
+## LLM honesty
+
+- Mock fallbacks are counted at `GET /api/v1/llm/telemetry` and included on `GET /llm/provider`.  
+- Logs: `llm_mock_fallback reason=…`
 
 ## Checkpoints
 

@@ -174,7 +174,7 @@ export default function DashboardPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex-1 p-8 text-sm text-muted-foreground">Loading canvas…</div>
+        <div className="flex-1 p-4 md:p-8 text-sm text-muted-foreground">Loading canvas…</div>
       }
     >
       <CanvasPageInner />
