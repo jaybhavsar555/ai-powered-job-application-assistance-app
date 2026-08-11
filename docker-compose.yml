@@ -68,10 +68,13 @@ services:
       REDIS_URL: redis://redis:6379/0
       QDRANT_URL: http://qdrant:6333
       OLLAMA_BASE_URL: http://ollama:11434/v1
+      OLLAMA_MODEL: qwen2.5:3b
+      OLLAMA_TIMEOUT_SECONDS: "180"
+      OLLAMA_MAX_TOKENS: "400"
       RESUME_SOURCE_DIR: /data/resumes
       APPLICATION_PACKAGE_DIR: /data/packages
       ENVIRONMENT: development
-      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001
       CHECKPOINT_BACKEND: postgres
     env_file:
       - ./backend/.env

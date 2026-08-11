@@ -111,18 +111,11 @@ export default function ResumesPage() {
   const [detail, setDetail] = useState<StudioDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const token = useAuthStore((s) => s.token);
+  const [selectedBaseResume, setSelectedBaseResume] = useState<string | null>(null);
+  const [showTailorModal, setShowTailorModal] = useState(false);
 
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [showTailorModal, setShowTailorModal] = useState(false);
-  const [tailorStep, setTailorStep] = useState<1 | 2>(1);
-  const [jdText, setJdText] = useState("");
-  const [jobUrl, setJobUrl] = useState("");
-  const [isTailoring, setIsTailoring] = useState(false);
-  const [selectedBaseResume, setSelectedBaseResume] = useState("");
-  const [proposedSkills, setProposedSkills] = useState<string[]>([]);
-  const [approvedSkills, setApprovedSkills] = useState<string[]>([]);
-  const [tailorResult, setTailorResult] = useState<string | null>(null);
   const setPreview = usePanelStore((s) => s.setPreview);
   const closePdf = usePanelStore((s) => s.closePdf);
   const pdfTitle = usePanelStore((s) => s.pdfTitle);
@@ -187,8 +180,8 @@ export default function ResumesPage() {
         const data = await libRes.json();
         const files = data.files || [];
         setBaseResumes(files);
-        if (files[0] && !selectedBaseResume) {
-          setSelectedBaseResume(files[0].name);
+        if (files[0]) {
+          // No longer track selectedBaseResume here since it moved to tailor page
         }
       } else {
         setBaseResumes([]);
@@ -214,7 +207,7 @@ export default function ResumesPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, authHeaders, selectedBaseResume]);
+  }, [token, authHeaders]);
 
   useEffect(() => {
     fetchData();
@@ -318,86 +311,7 @@ export default function ResumesPage() {
     }
   };
 
-  const handleAnalyzeJd = async () => {
-    if (!jdText.trim() && !jobUrl.trim()) {
-      setError("Paste a job description or URL first.");
-      return;
-    }
-    setIsTailoring(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/v1/workflows/analyze-jd-skills", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders(),
-        },
-        body: JSON.stringify({
-          job_description: jdText,
-          job_url: jobUrl,
-          base_resume: selectedBaseResume || baseResumes[0]?.name,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(typeof body.detail === "string" ? body.detail : "Analysis failed");
-      }
-      const data = await res.json();
-      const gap = data.skill_gap || {};
-      const missing = gap.missing_skills || [];
-      setProposedSkills(missing);
-      setApprovedSkills([...missing]);
-      setTailorStep(2);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Analysis failed");
-    } finally {
-      setIsTailoring(false);
-    }
-  };
 
-  const handleGenerateTailored = async () => {
-    setIsTailoring(true);
-    setError(null);
-    setTailorResult(null);
-    try {
-      const res = await fetch("/api/v1/workflows/tailor-resume", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders(),
-        },
-        body: JSON.stringify({
-          job_description: jdText,
-          job_url: jobUrl,
-          base_resume: selectedBaseResume || baseResumes[0]?.name,
-          approved_skills: approvedSkills,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(
-          typeof body.detail === "string" ? body.detail : "Tailor failed"
-        );
-      }
-      const data = await res.json();
-      const opt = data.optimized_resume || {};
-      const keywords = (opt.added_keywords || []).join(", ");
-      setTailorResult(
-        keywords
-          ? `Draft ready. Keywords added: ${keywords}. Approve via Canvas/Approvals to save a version.`
-          : "Draft returned. Approve via Canvas/Approvals to save a version."
-      );
-      setShowTailorModal(false);
-      setJdText("");
-      setJobUrl("");
-      setTailorStep(1);
-      setView("tailored");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Tailor failed");
-    } finally {
-      setIsTailoring(false);
-    }
-  };
 
   const downloadWithAuth = async (path: string, filename: string) => {
     try {
@@ -484,19 +398,13 @@ export default function ResumesPage() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setTailorStep(1);
-                  setJdText("");
-                  setJobUrl("");
-                  setShowTailorModal(true);
-                }}
+              <Link
+                href="/tailor"
                 className="inline-flex items-center gap-2 rounded-md border bg-background h-9 px-3 text-sm font-medium hover:bg-muted"
               >
                 <Wand2 className="h-4 w-4" />
                 Tailor JD
-              </button>
+              </Link>
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -601,20 +509,6 @@ export default function ResumesPage() {
             </button>
           </div>
         )}
-        {tailorResult && (
-          <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm flex gap-2">
-            <Sparkles className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
-            <span>{tailorResult}</span>
-            <button
-              type="button"
-              className="ml-auto"
-              onClick={() => setTailorResult(null)}
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        )}
-
         {/* ===== TAILORED (primary) ===== */}
         {view === "tailored" && (
           <section className="space-y-3">
@@ -863,18 +757,16 @@ export default function ResumesPage() {
                     <ul className="divide-y divide-border">
                       {files.map((resume) => {
                         const active = pdfTitle === resume.name;
-                        const selected = selectedBaseResume === resume.name;
                         return (
                           <li
                             key={resume.name}
                             className={`flex items-center gap-3 px-3 py-2.5 hover:bg-muted/40 ${
-                              active || selected ? "bg-primary/5" : ""
+                              active ? "bg-primary/5" : ""
                             }`}
                           >
                             <button
                               type="button"
                               onClick={() => {
-                                setSelectedBaseResume(resume.name);
                                 previewResume(resume.name);
                               }}
                               className="flex items-center gap-3 min-w-0 flex-1 text-left"
@@ -1069,156 +961,6 @@ export default function ResumesPage() {
         )}
       </div>
 
-      {/* Tailor modal */}
-      {showTailorModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-card border rounded-xl shadow-lg w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b shrink-0">
-              <h3 className="font-semibold">
-                {tailorStep === 1 ? "Tailor resume (Step 1/2)" : "Review Skills (Step 2/2)"}
-              </h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowTailorModal(false);
-                  setTailorStep(1);
-                }}
-                className="p-2 rounded-md hover:bg-muted"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            
-            <div className="p-4 space-y-4 overflow-y-auto">
-              {tailorStep === 1 ? (
-                <>
-                  <p className="text-sm text-muted-foreground">
-                    Draft only — save a version via Canvas / Approvals. We will scrape the JD and analyze missing skills first.
-                  </p>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Master template</label>
-                    <select
-                      value={selectedBaseResume}
-                      onChange={(e) => setSelectedBaseResume(e.target.value)}
-                      className="w-full p-3 rounded-md border bg-background text-sm"
-                    >
-                      {baseResumes.map((r) => (
-                        <option key={r.name} value={r.name}>
-                          [{roleLabel(r.role_hint)}] {shortName(r.name)}
-                        </option>
-                      ))}
-                      {baseResumes.length === 0 && (
-                        <option value="">No templates found</option>
-                      )}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Job URL (Optional)</label>
-                    <input
-                      type="url"
-                      value={jobUrl}
-                      onChange={(e) => setJobUrl(e.target.value)}
-                      className="w-full p-3 rounded-md border bg-background text-sm"
-                      placeholder="https://..."
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Job description (Optional if URL provided)</label>
-                    <textarea
-                      value={jdText}
-                      onChange={(e) => setJdText(e.target.value)}
-                      className="w-full h-32 p-3 rounded-md border bg-background text-sm font-mono resize-none"
-                      placeholder="Paste the JD…"
-                    />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm text-muted-foreground">
-                    The AI found the following skills missing from your base resume. Check only the ones you actually have experience with. We will weave them into your generated resume.
-                  </p>
-                  {proposedSkills.length === 0 ? (
-                    <div className="rounded-lg border bg-muted/50 p-4 text-center">
-                      <CheckCircle className="mx-auto h-8 w-8 text-emerald-500 mb-2" />
-                      <p className="font-medium text-sm">Your resume already covers the required skills!</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3 mt-4">
-                      {proposedSkills.map((skill) => (
-                        <label key={skill} className="flex items-center gap-3 p-3 rounded-lg border bg-card cursor-pointer hover:bg-muted/50">
-                          <input 
-                            type="checkbox"
-                            checked={approvedSkills.includes(skill)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setApprovedSkills([...approvedSkills, skill]);
-                              } else {
-                                setApprovedSkills(approvedSkills.filter(s => s !== skill));
-                              }
-                            }}
-                            className="h-4 w-4 rounded border-gray-300 text-primary"
-                          />
-                          <span className="text-sm font-medium">{skill}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-
-            <div className="p-4 border-t flex justify-end gap-2 shrink-0">
-              {tailorStep === 1 ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setShowTailorModal(false)}
-                    className="px-4 py-2 rounded-md text-sm hover:bg-muted"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleAnalyzeJd}
-                    disabled={isTailoring || baseResumes.length === 0}
-                    className="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground disabled:opacity-50 inline-flex items-center gap-2"
-                  >
-                    {isTailoring ? (
-                      <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    ) : (
-                      <Sparkles className="h-4 w-4" />
-                    )}
-                    Analyze JD
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setTailorStep(1)}
-                    className="px-4 py-2 rounded-md text-sm hover:bg-muted"
-                  >
-                    Back
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleGenerateTailored}
-                    disabled={isTailoring}
-                    className="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground disabled:opacity-50 inline-flex items-center gap-2"
-                  >
-                    {isTailoring ? (
-                      <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    ) : (
-                      <Wand2 className="h-4 w-4" />
-                    )}
-                    Generate ATS Resume
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

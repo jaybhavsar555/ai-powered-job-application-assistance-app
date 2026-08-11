@@ -160,10 +160,12 @@ async def _scrape_httpx(url: str) -> ScrapeResult:
         timeout=25.0,
         headers={
             "User-Agent": (
-                "Mozilla/5.0 (compatible; CareerOS/1.0; +https://localhost) "
-                "AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
             ),
-            "Accept": "text/html,application/xhtml+xml",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
         },
     ) as client:
         resp = await client.get(url)
@@ -171,14 +173,50 @@ async def _scrape_httpx(url: str) -> ScrapeResult:
         html = resp.text
 
     title, company, text = _hints_from_html(html, url)
-    if len(text) < 40:
-        raise ValueError("Fetched page had too little text")
+    if len(text) < 200:
+        raise ValueError(f"Fetched page had too little text ({len(text)} chars) — likely JS-rendered")
     return ScrapeResult(
         url=url,
         text=text[:50000],
         title=title,
         company=company,
         source="httpx",
+    )
+
+
+async def _scrape_jina(url: str) -> ScrapeResult:
+    """Use Jina AI Reader (r.jina.ai) to get clean markdown from JS-heavy pages.
+    Free, no API key needed, handles React/Next.js/Vue SPAs.
+    """
+    jina_url = f"https://r.jina.ai/{url}"
+    async with httpx.AsyncClient(
+        follow_redirects=True,
+        timeout=30.0,
+        headers={
+            "Accept": "text/plain",
+            "X-No-Cache": "true",
+            "X-Return-Format": "markdown",
+        },
+    ) as client:
+        resp = await client.get(jina_url)
+        resp.raise_for_status()
+        text = resp.text.strip()
+
+    if len(text) < 200:
+        raise ValueError(f"Jina returned too little text ({len(text)} chars)")
+
+    # Extract title from Jina's formatted output (it adds 'Title: ...' at top)
+    title = None
+    for line in text.splitlines()[:5]:
+        if line.startswith("Title:"):
+            title = line.replace("Title:", "").strip()
+            break
+
+    return ScrapeResult(
+        url=url,
+        text=text[:50000],
+        title=title,
+        source="jina",
     )
 
 
@@ -240,7 +278,9 @@ async def _scrape_playwright(url: str) -> ScrapeResult:
 
 async def scrape_job_page(url: str) -> ScrapeResult:
     """
-    Scrape a job posting URL. Order: Playwright → httpx → mock.
+    Scrape a job posting URL.
+    Order: Playwright → httpx → Jina AI Reader → mock.
+    Jina handles JS-rendered SPAs (Next.js, React, Vue) without needing Chromium.
     Never raises; always returns usable text for the intake agent.
     """
     errors: list[str] = []
@@ -254,6 +294,12 @@ async def scrape_job_page(url: str) -> ScrapeResult:
         return await _scrape_httpx(url)
     except Exception as exc:
         errors.append(f"httpx: {exc}")
+
+    # Jina AI Reader: renders JS-heavy pages server-side, returns clean markdown
+    try:
+        return await _scrape_jina(url)
+    except Exception as exc:
+        errors.append(f"jina: {exc}")
 
     mock = _mock_body(url)
     mock.error = "; ".join(errors) if errors else mock.error

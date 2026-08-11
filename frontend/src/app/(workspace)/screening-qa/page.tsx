@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { HelpCircle, Loader2, Plus, RefreshCw, Trash2, Sparkles } from "lucide-react";
+import { HelpCircle, Loader2, Plus, RefreshCw, Trash2, Sparkles, Edit2, Check, X } from "lucide-react";
 import api, { getApiErrorMessage } from "@/lib/api";
 
 interface ScreeningQA {
@@ -10,6 +10,55 @@ interface ScreeningQA {
   answer: string;
   tags: string[];
   updated_at?: string | null;
+}
+
+function QAItem({ item, onDelete, onUpdate }: { item: ScreeningQA; onDelete: (id: string) => void; onUpdate: (id: string, q: string, a: string, t: string) => Promise<void> }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [question, setQuestion] = useState(item.question);
+  const [answer, setAnswer] = useState(item.answer);
+  const [tags, setTags] = useState((item.tags || []).join(", "));
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    await onUpdate(item.id, question, answer, tags);
+    setSaving(false);
+    setIsEditing(false);
+  };
+
+  if (isEditing) {
+    return (
+      <li className="rounded-lg border bg-muted/30 p-4 space-y-3">
+        <input value={question} onChange={e => setQuestion(e.target.value)} className="w-full text-sm font-medium border rounded px-2 py-1 bg-background" placeholder="Question" />
+        <textarea value={answer} onChange={e => setAnswer(e.target.value)} className="w-full text-sm border rounded px-2 py-1 bg-background resize-y" rows={2} placeholder="Answer" />
+        <input value={tags} onChange={e => setTags(e.target.value)} className="w-full text-xs border rounded px-2 py-1 bg-background" placeholder="Tags (comma separated)" />
+        <div className="flex gap-2 justify-end pt-1">
+          <button type="button" onClick={() => setIsEditing(false)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-muted text-muted-foreground"><X className="w-3 h-3"/> Cancel</button>
+          <button type="button" onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1 rounded bg-primary text-primary-foreground px-2 py-1 text-xs"><Check className="w-3 h-3"/> Save</button>
+        </div>
+      </li>
+    );
+  }
+
+  return (
+    <li className="rounded-lg border bg-card p-4 flex gap-3 justify-between group">
+      <div className="min-w-0 space-y-1">
+        <p className="text-sm font-medium text-foreground">{item.question}</p>
+        <p className="text-sm text-muted-foreground whitespace-pre-wrap">{item.answer}</p>
+        {item.tags?.length > 0 && (
+          <div className="flex flex-wrap gap-1 pt-1">
+            {item.tags.map((t) => (
+              <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">{t}</span>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="flex flex-col gap-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button type="button" onClick={() => setIsEditing(true)} className="text-muted-foreground hover:text-foreground"><Edit2 className="h-4 w-4" /></button>
+        <button type="button" onClick={() => onDelete(item.id)} className="text-muted-foreground hover:text-destructive"><Trash2 className="h-4 w-4" /></button>
+      </div>
+    </li>
+  );
 }
 
 export default function ScreeningQAPage() {
@@ -75,6 +124,20 @@ export default function ScreeningQAPage() {
       setError(getApiErrorMessage(err, "Failed to delete"));
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleUpdate = async (id: string, q: string, a: string, t: string) => {
+    setError(null);
+    try {
+      await api.patch(`/screening-qa/${id}`, {
+        question: q.trim(),
+        answer: a.trim(),
+        tags: t.split(",").map((x) => x.trim()).filter(Boolean),
+      });
+      await fetchItems();
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, "Failed to update"));
     }
   };
 
@@ -220,42 +283,7 @@ export default function ScreeningQAPage() {
       ) : (
         <ul className="space-y-3">
           {items.map((item) => (
-            <li
-              key={item.id}
-              className="rounded-lg border bg-card p-4 flex gap-3 justify-between"
-            >
-              <div className="min-w-0 space-y-1">
-                <p className="text-sm font-medium text-foreground">{item.question}</p>
-                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                  {item.answer}
-                </p>
-                {item.tags?.length > 0 && (
-                  <div className="flex flex-wrap gap-1 pt-1">
-                    {item.tags.map((t) => (
-                      <span
-                        key={t}
-                        className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border"
-                      >
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <button
-                type="button"
-                title="Delete"
-                disabled={deletingId === item.id}
-                onClick={() => handleDelete(item.id)}
-                className="shrink-0 text-muted-foreground hover:text-destructive disabled:opacity-50"
-              >
-                {deletingId === item.id ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Trash2 className="h-4 w-4" />
-                )}
-              </button>
-            </li>
+            <QAItem key={item.id} item={item} onDelete={handleDelete} onUpdate={handleUpdate} />
           ))}
         </ul>
       )}

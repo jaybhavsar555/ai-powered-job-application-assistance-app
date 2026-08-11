@@ -6,7 +6,7 @@ import axios from "axios";
 import { useAuthStore } from "@/store/auth";
 import { getApiErrorMessage } from "@/lib/api";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api/v1";
+const API = process.env.NEXT_PUBLIC_API_URL || "/api/v1";
 
 type SeedAccount = { role: string; email: string; password: string };
 

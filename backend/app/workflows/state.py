@@ -19,3 +19,5 @@ class AgentState(TypedDict):
     recruiter_discovery: Dict[str, Any]
     outreach_draft: Dict[str, Any]
     long_term_memory: List[Dict[str, Any]]
+    resume_json: str
+    hallucination_report: Dict[str, Any]

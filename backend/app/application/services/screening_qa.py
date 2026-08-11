@@ -147,6 +147,21 @@ class ScreeningQAService:
             "The role matches my strengths building product and shipping reliably — excited to contribute.",
             ["motivation"],
         ),
+        (
+            "What is your current address?",
+            "123 Main St, Tech City, ST 12345",
+            ["address", "location"],
+        ),
+        (
+            "What is your current or most recent company?",
+            "My Current Company Inc.",
+            ["company", "employer"],
+        ),
+        (
+            "What is your postal code / zip code / pincode?",
+            "12345",
+            ["pincode", "zip", "postal"],
+        ),
     ]
 
     async def seed_defaults(self, user_id: UUID) -> dict[str, Any]:

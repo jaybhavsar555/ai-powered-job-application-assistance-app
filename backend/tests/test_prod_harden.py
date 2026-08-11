@@ -118,7 +118,16 @@ async def test_ingest_inbox_and_message_send(monkeypatch):
             property(lambda self: False),
         )
 
-        result = await send_message(message_id=message_id, db=db, current_user=user)
+        # Soft package gate first; force=True exercises mailto path without SMTP
+        gated = await send_message(
+            message_id=message_id, force=False, db=db, current_user=user
+        )
+        assert gated["success"] is False
+        assert gated.get("package_required") is True
+
+        result = await send_message(
+            message_id=message_id, force=True, db=db, current_user=user
+        )
         assert result["success"] is False
         assert result["smtp_configured"] is False
         assert "mailto:" in result["mailto"]

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Building2, GripVertical, ExternalLink, FileStack, Loader2, Workflow } from "lucide-react";
+import { Building2, GripVertical, ExternalLink, FileStack, Loader2, Workflow, Presentation } from "lucide-react";
 
 export type ApplicationStage =
   | "Wishlist"
@@ -133,6 +133,18 @@ export function ApplicationCard({
               )}
               {busy ? "Packaging…" : "Package"}
             </button>
+          )}
+          {application.stage === "Interview" && (
+            <Link
+              href={`/interviews/${application.id}`}
+              title="View Interview Prep Guide & Mock Interview Simulator"
+              onClick={(e) => e.stopPropagation()}
+              draggable={false}
+              className="inline-flex items-center gap-1 text-[10px] px-1.5 py-1 rounded border border-primary/50 text-primary hover:bg-primary/10 transition-colors bg-primary/5"
+            >
+              <Presentation className="h-3 w-3" />
+              Prep Guide
+            </Link>
           )}
         </div>
       </div>

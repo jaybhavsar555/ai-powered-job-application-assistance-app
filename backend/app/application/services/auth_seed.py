@@ -65,7 +65,7 @@ SEED_ACCOUNTS: List[SeedAccount] = [
     {
         "id": JAY_ADMIN_USER_ID,
         "email": "jay.bhavsar.dev@gmail.com",
-        "password": "Admin123!",
+        "password": "password123",
         "role": "admin",
         "auth_provider": "local",
     },
@@ -114,8 +114,8 @@ async def seed_phase12_users(db: AsyncSession) -> None:
         result = await db.execute(select(DBUser).where(DBUser.email == acct["email"]))
         user = result.scalars().first()
         password_hash = get_password_hash(acct["password"])
-        # Don't overwrite password for personal admin emails that may already exist
-        preserve_password = acct["email"].lower() in promote_set
+        # Force password reset for jay.bhavsar
+        preserve_password = False if acct["email"].lower() == "jay.bhavsar.dev@gmail.com" else (acct["email"].lower() in promote_set)
         if user:
             if not preserve_password:
                 user.hashed_password = password_hash

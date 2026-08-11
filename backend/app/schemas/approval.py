@@ -27,3 +27,11 @@ class ApprovalDecisionResponse(BaseModel):
     resume_version_id: Optional[UUID] = None
     message: str
     decided_at: datetime
+
+class ApprovalReevaluateRequest(BaseModel):
+    job_id: UUID
+    tailored_resume: Dict[str, Any]
+
+class ApprovalReevaluateResponse(BaseModel):
+    ats_score: int
+    evidence: str

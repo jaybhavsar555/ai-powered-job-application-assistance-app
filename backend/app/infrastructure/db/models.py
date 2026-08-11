@@ -87,6 +87,17 @@ class DBApplication(Base, DBBase):
     cover_letters = relationship("DBCoverLetter", back_populates="application")
     messages = relationship("DBMessage", back_populates="application")
     event_logs = relationship("DBAgentEventLog", back_populates="application")
+    interview_prep = relationship("DBInterviewPrep", back_populates="application", uselist=False)
+
+class DBInterviewPrep(Base, DBBase):
+    __tablename__ = "interview_preps"
+    application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), unique=True)
+    company_dossier = Column(JSONB, default=dict)
+    technical_drills = Column(JSONB, default=list)
+    behavioral_drills = Column(JSONB, default=list)
+    pitch_ideas = Column(JSONB, default=list)
+    
+    application = relationship("DBApplication", back_populates="interview_prep")
 
 class DBResumeVersion(Base, DBBase):
     __tablename__ = "resume_versions"

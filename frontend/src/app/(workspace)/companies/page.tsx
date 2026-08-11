@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Building2, Search, ExternalLink, Activity } from "lucide-react";
+import { Building2, Search, Activity } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 
 interface Company {
   id: string;
   name: string;
-  research_data: any;
+  research_data: Record<string, unknown> | null;
   created_at: string;
 }
 

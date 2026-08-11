@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useWorkflowStore, type WorkflowEvent } from './useWorkflowStore';
 import { useAuthStore } from '@/store/auth';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api/v1';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
 
 function agentKey(data: { node?: string; agent?: string }) {
   return data.node || data.agent || 'unknown';
@@ -94,8 +94,8 @@ export function useWorkflowStream(jobId: string, resume = false, nonce = 0) {
         timestamp: new Date().toISOString(),
         error:
           ready === EventSource.CLOSED
-            ? `SSE closed (${API_BASE}). Check API on :8001, valid login token, and that a real Tracker job is selected (not only demo). Redis is optional for same-process events.`
-            : `SSE connection failed (${API_BASE}). Is the API on :8001?`,
+            ? `SSE closed (${API_BASE}). Check Docker API (port 8001), valid login token, and that a real Tracker job is selected (not only demo).`
+            : `SSE connection failed (${API_BASE}). Is Docker API up on :8001?`,
       });
       setWorkflowStatus('error');
       eventSource.close();

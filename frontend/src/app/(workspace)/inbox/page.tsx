@@ -16,6 +16,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useAuthStore } from "@/store/auth";
+import {
+  AgentTaskRow,
+  stageToTaskStatus,
+} from "@/components/ui/AgentTaskRow";
 
 interface NextAction {
   action: string;
@@ -184,7 +188,7 @@ export default function InboxPage() {
   const setApplyMode = async (mode: "review_and_apply" | "auto_apply") => {
     setModeBusy(true);
     try {
-      const res = await fetch("/api/v1/apply-prefs/", {
+      const res = await fetch("/api/v1/apply-prefs", {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -536,22 +540,15 @@ export default function InboxPage() {
           <ul className="space-y-2">
             {summary!.new_jobs_48h!.map((j) => (
               <li key={j.application_id}>
-                <Link
+                <AgentTaskRow
+                  title={`${j.company} — ${j.role_title || "Role"}`}
+                  subtitle={`~${j.age_hours ?? 0}h old`}
+                  meta={j.stage || "Wishlist"}
+                  status="pending"
+                  badge="Fresh"
                   href={j.href}
-                  className="flex items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3 hover:bg-muted/40 transition-colors"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">
-                      {j.company} — {j.role_title || "Role"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      ~{j.age_hours ?? 0}h old · {j.stage || "Wishlist"}
-                    </p>
-                  </div>
-                  <span className="text-xs font-medium text-primary shrink-0">
-                    Apply now →
-                  </span>
-                </Link>
+                  actionLabel="Apply now →"
+                />
               </li>
             ))}
           </ul>
@@ -575,20 +572,15 @@ export default function InboxPage() {
           <ul className="space-y-2">
             {summary!.start_applying!.slice(0, 8).map((j) => (
               <li key={j.application_id}>
-                <Link
+                <AgentTaskRow
+                  title={`${j.company} — ${j.role_title || "Role"}`}
+                  subtitle={j.stage}
+                  meta={j.url ? "Has apply URL" : "No URL — fix on Jobs"}
+                  status={stageToTaskStatus(j.stage)}
+                  badge={j.stage}
                   href={j.href}
-                  className="flex items-center justify-between gap-3 rounded-lg border px-4 py-3 hover:bg-muted/40"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">
-                      {j.company} — {j.role_title || "Role"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">{j.stage}</p>
-                  </div>
-                  <span className="text-xs font-medium text-primary shrink-0">
-                    Start →
-                  </span>
-                </Link>
+                  actionLabel="Start →"
+                />
               </li>
             ))}
           </ul>
@@ -601,12 +593,17 @@ export default function InboxPage() {
           <p className="text-sm text-muted-foreground">
             Fix Screening Q&A or log in on the employer site, move to Reapply on Tracker, resume.
           </p>
-          <ul className="text-sm space-y-1">
+          <ul className="space-y-2">
             {summary!.skip_queue!.slice(0, 5).map((s, i) => (
-              <li key={`${s.at}-${i}`} className="text-muted-foreground">
-                <span className="text-foreground font-medium">{s.reason}</span>
-                {s.host ? ` · ${s.host}` : ""}
-                {s.detail ? ` — ${s.detail}` : ""}
+              <li key={`${s.at}-${i}`}>
+                <AgentTaskRow
+                  title={s.reason || "Paused apply"}
+                  subtitle={s.host || undefined}
+                  meta={s.detail || undefined}
+                  status="needs_input"
+                  href="/screening-qa"
+                  actionLabel="Fix →"
+                />
               </li>
             ))}
           </ul>

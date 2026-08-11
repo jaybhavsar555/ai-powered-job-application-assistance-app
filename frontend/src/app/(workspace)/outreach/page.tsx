@@ -18,6 +18,11 @@ import {
 import { useAuthStore } from "@/store/auth";
 import { usePanelStore } from "@/store/panelStore";
 
+/** Navigate outside React state rules (mailto / in-app CTA). */
+function hardNavigate(url: string) {
+  window.location.assign(url);
+}
+
 interface Attachment {
   kind: string;
   name: string;
@@ -233,12 +238,12 @@ export default function OutreachPage() {
             `${data.message}\n\nOpen Approvals to package? (Cancel = send anyway)`
           );
           if (go && data.cta) {
-            window.location.href = data.cta;
+            hardNavigate(data.cta);
           } else if (!go) {
             await handleAutoSend(id, true);
           }
         } else if (data.mailto) {
-          window.location.href = data.mailto;
+          hardNavigate(data.mailto);
           alert(
             (data.message || "Opened mailto.") +
               " After you send, click Mark sent."

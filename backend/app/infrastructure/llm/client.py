@@ -110,25 +110,26 @@ async def warm_ollama_model(cfg=None) -> dict[str, Any]:
 
 async def structured_generate(response_model, messages, *, fallback, max_tokens: int | None = None):
     """
-    Run Instructor structured generation. On missing model / Ollama errors / timeout,
-    return the fallback instance so workflows stay demoable on CPU-only hosts.
-    Every mock path is logged + counted (`llm_mock_fallback` telemetry).
+    Run Instructor structured generation.
+    - If force_mock is set (intentional dev/test mode), uses fallback.
+    - If LLM provider is not configured, raises RuntimeError.
+    - If LLM call fails (OpenAI + Ollama both fail), raises RuntimeError.
+    No silent mock fallbacks in production paths.
     """
     cfg = get_llm_runtime()
     record_llm_call()
 
+    # Intentional mock mode (force_mock=true in .env for local dev/tests)
     if cfg.force_mock:
         record_mock_fallback(reason="force_mock", provider=cfg.provider, model=cfg.model)
         return fallback() if callable(fallback) else fallback
 
     client = get_instructor_client()
     if client is None:
-        record_mock_fallback(
-            reason="provider_not_configured",
-            provider=cfg.provider,
-            model=cfg.model,
+        raise RuntimeError(
+            f"LLM provider '{cfg.provider}' is not configured or has no API key. "
+            "Check your .env (LLM_PROVIDER, OPENAI_API_KEY, or OLLAMA_BASE_URL)."
         )
-        return fallback() if callable(fallback) else fallback
 
     model = cfg.model
     timeout = cfg.timeout_seconds
@@ -164,6 +165,9 @@ async def structured_generate(response_model, messages, *, fallback, max_tokens:
         extra["options"]["num_predict"] = token_budget
         create_kwargs["extra_body"] = extra
 
+    last_error: Exception | None = None
+
+    # Primary LLM call
     try:
         print(
             f"[LLM] provider={cfg.provider} model={model} "
@@ -175,17 +179,78 @@ async def structured_generate(response_model, messages, *, fallback, max_tokens:
         )
         record_llm_success()
         return result
-    except asyncio.TimeoutError:
-        record_mock_fallback(reason="timeout", provider=cfg.provider, model=model)
-        return fallback() if callable(fallback) else fallback
     except Exception as exc:
-        record_mock_fallback(
-            reason=type(exc).__name__,
-            provider=cfg.provider,
-            model=model,
-        )
+        last_error = exc
         print(
-            f"[LLM] provider={cfg.provider} model={model} "
-            f"Falling back to mock ({type(exc).__name__}: {exc})"
+            f"[LLM] provider={cfg.provider} model={model} failed "
+            f"({type(exc).__name__}: {exc})"
         )
-        return fallback() if callable(fallback) else fallback
+
+    # Ollama fallback (only when primary provider is OpenAI)
+    if cfg.provider == "openai":
+        try:
+            from app.core.config import get_settings
+            settings = get_settings()
+
+            ollama_client = AsyncOpenAI(
+                api_key="ollama",
+                base_url=settings.OLLAMA_BASE_URL,
+                timeout=httpx.Timeout(settings.OLLAMA_TIMEOUT_SECONDS, connect=10.0),
+            )
+            ollama_inst = instructor.from_openai(ollama_client, mode=instructor.Mode.JSON)
+
+            ollama_model = settings.OLLAMA_MODEL
+            speed_hint = (
+                "Respond with compact JSON only. Prefer short strings and small arrays. "
+                f"Stay well under {token_budget} tokens."
+            )
+            call_messages_ollama = list(messages)
+            if call_messages_ollama:
+                first = call_messages_ollama[0]
+                if first.get("role") == "system":
+                    call_messages_ollama[0] = {
+                        **first,
+                        "content": f"{first.get('content', '')}\n\n{speed_hint}".strip(),
+                    }
+                else:
+                    call_messages_ollama.insert(0, {"role": "system", "content": speed_hint})
+
+            ollama_kwargs: dict[str, Any] = {
+                "model": ollama_model,
+                "response_model": response_model,
+                "messages": call_messages_ollama,
+                "max_retries": 0,
+                "max_tokens": token_budget,
+                "temperature": 0.2,
+            }
+            extra = {
+                "options": {
+                    "num_predict": token_budget,
+                    "num_ctx": min(settings.OLLAMA_NUM_CTX, 2048),
+                }
+            }
+            if settings.OLLAMA_NUM_THREAD > 0:
+                extra["options"]["num_thread"] = settings.OLLAMA_NUM_THREAD
+            ollama_kwargs["extra_body"] = extra
+
+            print(f"[LLM] fallback provider=ollama model={ollama_model} max_tokens={token_budget}")
+            result = await asyncio.wait_for(
+                ollama_inst.chat.completions.create(**ollama_kwargs),
+                timeout=settings.OLLAMA_TIMEOUT_SECONDS,
+            )
+            record_llm_success()
+            return result
+        except Exception as inner_exc:
+            print(f"[LLM] Ollama fallback also failed: {inner_exc}")
+            last_error = inner_exc
+
+    # Both providers failed — raise so the API returns a real error, not hallucinated data
+    record_mock_fallback(
+        reason=type(last_error).__name__ if last_error else "unknown",
+        provider=cfg.provider,
+        model=model,
+    )
+    raise RuntimeError(
+        f"LLM call failed (provider={cfg.provider} model={model}): "
+        f"{type(last_error).__name__}: {last_error}"
+    )

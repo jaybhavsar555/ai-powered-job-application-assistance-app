@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { 
-  Search, MapPin, Briefcase, DollarSign, Globe, Play, 
-  CheckCircle, Bot, Sparkles, Wand2, Building, Code2, ArrowRight,
+  Search, MapPin, Briefcase, DollarSign, Globe, 
+  CheckCircle, Bot, Sparkles, Wand2, Code2, ArrowRight,
   UploadCloud
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
@@ -20,6 +20,26 @@ interface PreferenceState {
   techStack: string;
 }
 
+interface DiscoveredJob {
+  id: string;
+  company: string;
+  title: string;
+  location?: string;
+  salary?: string;
+  description?: string;
+  full_jd?: string;
+  company_info?: string;
+  contact_info?: string;
+  matchScore?: number;
+  matchReason?: string;
+  url?: string | null;
+  source?: string | null;
+  posted_at?: string | null;
+  applyable?: boolean;
+  wishlisted?: boolean;
+  ingestedJobId?: string;
+}
+
 const LOCATION_HUBS = [
   { id: "india", label: "India Tech Hubs", desc: "BLR, BOM, PUN, HYD, DEL" },
   { id: "usa", label: "USA & Canada", desc: "SF, NY, Austin, Toronto" },
@@ -27,7 +47,6 @@ const LOCATION_HUBS = [
 ];
 
 const COMPANY_TYPES = ["Startups", "Mid-size", "MNCs / Enterprise"];
-const EXP_LEVELS = ["Junior (0-2y)", "Mid-Level (3-5y)", "Senior (5-8y)", "Staff / Principal (8y+)"];
 
 export default function DiscoveryPage() {
   const router = useRouter();
@@ -46,8 +65,10 @@ export default function DiscoveryPage() {
 
   const [loading, setLoading] = useState(false);
   const [autoFilling, setAutoFilling] = useState(false);
-  const [recommendedJobs, setRecommendedJobs] = useState<any[]>([]);
+  const [recommendedJobs, setRecommendedJobs] = useState<DiscoveredJob[]>([]);
   const [activeTab, setActiveTab] = useState<'setup' | 'results'>('setup');
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [expandedJDs, setExpandedJDs] = useState<Record<string, boolean>>({});
   const [ingestingId, setIngestingId] = useState<string | null>(null);
   const [wishlistNotice, setWishlistNotice] = useState<string | null>(null);
   const [libraryResumes, setLibraryResumes] = useState<string[]>([]);
@@ -207,11 +228,12 @@ export default function DiscoveryPage() {
         throw new Error(detail);
       }
       const data = await res.json();
-      const jobs = data.jobs || [];
+      const jobs = (data.jobs || []) as DiscoveredJob[];
       if (jobs.length === 0) {
         throw new Error("Discovery returned no jobs");
       }
       setRecommendedJobs(jobs);
+      if (jobs.length > 0) setSelectedJobId(jobs[0].id);
       setActiveTab("results");
     } catch (err) {
       console.error(err);
@@ -432,6 +454,20 @@ export default function DiscoveryPage() {
                   </div>
                   
                   <div className="space-y-2">
+                    <label className="text-sm font-medium">Experience Level</label>
+                    <select
+                      value={preferences.experienceLevel}
+                      onChange={(e) => setPreferences({ ...preferences, experienceLevel: e.target.value })}
+                      className="w-full h-12 px-4 rounded-xl border border-input bg-background/50 focus:bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all appearance-none"
+                    >
+                      <option value="Entry-Level (0-2y)">Entry-Level (0-2y)</option>
+                      <option value="Mid-Level (2-4y)">Mid-Level (2-4y)</option>
+                      <option value="Senior (5-8y)">Senior (5-8y)</option>
+                      <option value="Lead/Staff (8y+)">Lead/Staff (8y+)</option>
+                    </select>
+                  </div>
+                  
+                  <div className="space-y-2">
                     <label className="text-sm font-medium">Minimum Base Salary (INR)</label>
                     <div className="relative">
                       <span className="absolute left-4 top-1/2 -translate-y-1/2 font-medium text-muted-foreground">₹</span>
@@ -623,122 +659,184 @@ export default function DiscoveryPage() {
                 </button>
               </div>
             ) : (
-              <div className="space-y-6">
-                {wishlistNotice && (
-                  <div className="rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm flex flex-wrap items-center justify-between gap-3">
-                    <span>{wishlistNotice}</span>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => router.push("/jobs")}
-                        className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
-                      >
-                        Open Jobs
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => router.push("/tracker")}
-                        className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted"
-                      >
-                        Tracker
-                      </button>
+              <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-250px)]">
+                {/* Master List */}
+                <div className="w-full lg:w-1/3 flex flex-col gap-4 overflow-y-auto pr-2 pb-20">
+                  {wishlistNotice && (
+                    <div className="rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm flex flex-col gap-3">
+                      <span>{wishlistNotice}</span>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => router.push("/jobs")}
+                          className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground text-center flex-1"
+                        >
+                          Open Jobs
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => router.push("/tracker")}
+                          className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted text-center flex-1"
+                        >
+                          Tracker
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                )}
-                {recommendedJobs.map((job) => (
-                  <div key={job.id} className="group rounded-2xl border bg-card p-1 shadow-sm hover:shadow-xl transition-all duration-300">
-                    <div className="bg-card rounded-xl p-6 md:p-8 flex flex-col lg:flex-row gap-8 relative overflow-hidden">
-                      <div className="absolute -right-12 -top-12 w-48 h-48 bg-green-500/5 rounded-full blur-2xl"></div>
-                      
-                      <div className="flex-1 space-y-6">
-                        <div className="flex justify-between items-start">
+                  )}
+
+                  {recommendedJobs.map(job => (
+                    <div 
+                      key={job.id} 
+                      onClick={() => setSelectedJobId(job.id)}
+                      className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                        selectedJobId === job.id 
+                          ? 'border-primary bg-primary/5 shadow-md scale-[1.02]' 
+                          : 'hover:border-primary/50 bg-card hover:bg-muted/50'
+                      }`}
+                    >
+                      <div className="flex justify-between items-start mb-2 gap-2">
+                        <h4 className="font-bold text-base leading-tight">{job.title}</h4>
+                        <span className="text-xs font-bold text-green-600 bg-green-500/10 px-2 py-1 rounded-md shrink-0">
+                          {job.matchScore}
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{job.company}</p>
+                      <div className="flex gap-2 mt-3 flex-wrap">
+                        <span className="text-[11px] bg-muted px-2 py-1 rounded-md font-medium text-muted-foreground">
+                          {job.location}
+                        </span>
+                        {job.wishlisted && (
+                          <span className="text-[11px] bg-primary/10 text-primary px-2 py-1 rounded-md font-bold uppercase tracking-wider">
+                            Wishlisted
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Detail Pane */}
+                <div className="w-full lg:w-2/3 bg-card border rounded-2xl p-6 lg:p-8 overflow-y-auto pb-20 relative shadow-sm">
+                  {(() => {
+                    const job = recommendedJobs.find(j => j.id === selectedJobId) || recommendedJobs[0];
+                    if (!job) return null;
+                    return (
+                      <div className="space-y-6">
+                        <div className="flex justify-between items-start flex-wrap gap-4">
                           <div>
                             <div className="flex items-center gap-3 mb-2 flex-wrap">
-                              <h3 className="text-2xl font-black">{job.title}</h3>
-                              <span className="px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold uppercase tracking-wider">
-                                {job.wishlisted ? "On Wishlist" : "New Match"}
-                              </span>
+                              <h3 className="text-3xl font-black">{job.title}</h3>
+                              {job.wishlisted && (
+                                <span className="px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold uppercase tracking-wider">
+                                  On Wishlist
+                                </span>
+                              )}
                               {job.source && (
                                 <span className="px-2 py-1 rounded-full border text-[10px] font-semibold uppercase text-muted-foreground">
                                   {job.source}
                                 </span>
                               )}
                             </div>
-                            <p className="text-lg text-muted-foreground font-medium">{job.company}</p>
+                            <p className="text-xl text-muted-foreground font-medium">{job.company}</p>
                           </div>
                           
-                          <div className="flex flex-col items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-green-500/20 to-green-500/5 border border-green-500/20">
-                            <span className="text-3xl font-black text-green-600">{job.matchScore}</span>
-                            <span className="text-[10px] font-bold uppercase text-green-700/70">Score</span>
+                          <div className="flex flex-col items-center justify-center w-24 h-24 rounded-3xl bg-gradient-to-br from-green-500/20 to-green-500/5 border border-green-500/20 shadow-inner">
+                            <span className="text-4xl font-black text-green-600">{job.matchScore}</span>
+                            <span className="text-[11px] font-bold uppercase text-green-700/70 tracking-widest mt-1">Match</span>
                           </div>
                         </div>
                         
                         <div className="flex flex-wrap gap-4 text-sm font-medium">
-                          <span className="flex items-center gap-2 bg-muted px-4 py-2 rounded-lg">
+                          <span className="flex items-center gap-2 bg-muted px-4 py-2.5 rounded-xl border border-border/50 shadow-sm">
                             <MapPin className="h-4 w-4 text-primary" /> {job.location}
                           </span>
-                          <span className="flex items-center gap-2 bg-muted px-4 py-2 rounded-lg">
+                          <span className="flex items-center gap-2 bg-muted px-4 py-2.5 rounded-xl border border-border/50 shadow-sm">
                             <DollarSign className="h-4 w-4 text-green-600" /> {job.salary}
                           </span>
                         </div>
+
+                        <div className="flex flex-wrap gap-3 mt-2">
+                          {job.wishlisted && job.ingestedJobId ? (
+                            <>
+                              <Link
+                                href={`/apply?job_id=${encodeURIComponent(job.ingestedJobId)}`}
+                                className="inline-flex items-center justify-center rounded-xl text-sm font-bold bg-primary text-primary-foreground h-12 px-6 shadow-md hover:shadow-lg transition-all"
+                              >
+                                Review &amp; Apply
+                              </Link>
+                              <Link
+                                href={`/canvas?job_id=${encodeURIComponent(job.ingestedJobId)}`}
+                                className="inline-flex items-center justify-center rounded-xl text-sm font-bold border h-12 px-6 hover:bg-muted transition-colors"
+                              >
+                                Open Canvas
+                              </Link>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={ingestingId === job.id}
+                              onClick={() => handleAddToWishlist(job.id)}
+                              className="inline-flex items-center justify-center rounded-xl text-sm font-bold transition-all bg-primary text-primary-foreground hover:opacity-90 h-12 px-8 gap-2 shadow-lg disabled:opacity-60"
+                            >
+                              <CheckCircle className="h-4 w-4" />
+                              {ingestingId === job.id ? "Adding…" : "Add to Wishlist"}
+                            </button>
+                          )}
+                          {job.url && (
+                            <a
+                              href={job.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center justify-center rounded-xl text-sm font-medium transition-colors text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/30 h-12 px-6 gap-2 border border-blue-200 dark:border-blue-900"
+                            >
+                              <Globe className="h-4 w-4" />
+                              View Original
+                            </a>
+                          )}
+                        </div>
                         
-                        <div className="bg-gradient-to-r from-blue-500/10 to-transparent p-5 rounded-xl border-l-4 border-blue-500">
-                          <div className="flex items-start gap-3">
-                            <Bot className="h-6 w-6 text-blue-600 shrink-0 mt-0.5" />
+                        <div className="bg-gradient-to-r from-blue-500/10 to-transparent p-6 rounded-2xl border-l-4 border-blue-500 mt-6">
+                          <div className="flex items-start gap-4">
+                            <Bot className="h-8 w-8 text-blue-600 shrink-0 mt-1" />
                             <div>
-                              <h4 className="text-sm font-bold text-blue-900 dark:text-blue-400 mb-1">AI Analysis</h4>
-                              <p className="text-blue-800/80 dark:text-blue-300/80 leading-relaxed">{job.matchReason}</p>
+                              <h4 className="text-base font-bold text-blue-900 dark:text-blue-400 mb-2">AI Match Analysis</h4>
+                              <p className="text-blue-900/80 dark:text-blue-300/80 leading-relaxed text-[15px]">{job.matchReason}</p>
                             </div>
                           </div>
                         </div>
-                      </div>
-                      
-                      <div className="flex lg:flex-col justify-end gap-3 lg:w-56 lg:border-l lg:pl-8">
-                        {job.wishlisted && job.ingestedJobId ? (
-                          <div className="flex flex-col gap-2 w-full">
-                            <Link
-                              href={`/apply?job_id=${encodeURIComponent(job.ingestedJobId)}`}
-                              className="flex-1 w-full inline-flex items-center justify-center rounded-xl text-sm font-bold bg-primary text-primary-foreground h-12 px-6 gap-2"
-                            >
-                              Review &amp; Apply
-                            </Link>
-                            <Link
-                              href={`/canvas?job_id=${encodeURIComponent(job.ingestedJobId)}`}
-                              className="flex-1 w-full inline-flex items-center justify-center rounded-xl text-sm font-bold border h-12 px-6 gap-2 hover:bg-muted"
-                            >
-                              Open Canvas
-                            </Link>
-                            <Link
-                              href="/jobs"
-                              className="flex-1 w-full inline-flex items-center justify-center rounded-xl text-sm font-medium border h-10 px-6 gap-2 hover:bg-muted"
-                            >
-                              View on Jobs
-                            </Link>
+
+                        {job.company_info && (
+                          <div className="p-6 rounded-2xl border bg-muted/30 mt-6">
+                            <h4 className="text-base font-bold mb-3 flex items-center gap-2">
+                              <Briefcase className="h-5 w-5 text-muted-foreground" /> Firm Overview
+                            </h4>
+                            <p className="text-[15px] leading-relaxed text-muted-foreground">{job.company_info}</p>
                           </div>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={ingestingId === job.id}
-                            onClick={() => handleAddToWishlist(job.id)}
-                            className="flex-1 w-full inline-flex items-center justify-center rounded-xl text-sm font-bold transition-all bg-primary text-primary-foreground hover:opacity-90 h-14 px-6 gap-2 shadow-lg disabled:opacity-60"
-                          >
-                            <CheckCircle className="h-5 w-5" />
-                            {ingestingId === job.id ? "Adding…" : "Add to Wishlist"}
-                          </button>
                         )}
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setRecommendedJobs((prev) => prev.filter((j) => j.id !== job.id))
-                          }
-                          className="flex-1 w-full inline-flex items-center justify-center rounded-xl text-sm font-medium transition-colors border-2 hover:bg-muted text-muted-foreground hover:text-foreground h-14 px-6"
-                        >
-                          Dismiss
-                        </button>
+                        
+                        {job.contact_info && (
+                          <div className="p-6 rounded-2xl border bg-orange-500/5 border-orange-500/20 mt-6">
+                            <h4 className="text-base font-bold text-orange-700 dark:text-orange-400 mb-3 flex items-center gap-2">
+                              Contact Info Found
+                            </h4>
+                            <p className="text-[15px] leading-relaxed text-orange-800/80 dark:text-orange-300/80">{job.contact_info}</p>
+                          </div>
+                        )}
+                        
+                        {job.full_jd && (
+                          <div className="mt-8 border-t pt-8">
+                            <h4 className="text-lg font-bold mb-4 flex items-center gap-2">
+                              Full Job Description
+                            </h4>
+                            <div className="text-[15px] leading-relaxed text-muted-foreground whitespace-pre-wrap font-serif">
+                              {job.full_jd}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  </div>
-                ))}
+                    );
+                  })()}
+                </div>
               </div>
             )}
           </div>

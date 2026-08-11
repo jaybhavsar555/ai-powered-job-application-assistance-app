@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useState, FormEvent, useCallback } from "react";
 import {
   Plus,
   Search,
@@ -44,7 +44,7 @@ export default function JobsPage() {
   const token = useAuthStore((s) => s.token);
   const router = useRouter();
 
-  const fetchJobs = async () => {
+  const fetchJobs = useCallback(async () => {
     try {
       setLoading(true);
       setLoadError(null);
@@ -69,11 +69,11 @@ export default function JobsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
 
   useEffect(() => {
-    if (token) fetchJobs();
-  }, [token]);
+    if (token) void fetchJobs();
+  }, [token, fetchJobs]);
 
   // Vault "Import job URL" links here with ?import=1 (avoid useSearchParams Suspense issues)
   useEffect(() => {

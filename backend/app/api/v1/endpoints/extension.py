@@ -63,6 +63,8 @@ async def extension_autofill_profile(
     settings = get_settings()
     name, contact = "Candidate", current_user.email
     phone = ""
+    location = ""
+    linkedin = ""
     try:
         source = Path(settings.RESUME_SOURCE_DIR) if settings.RESUME_SOURCE_DIR else None
         if source and source.exists():
@@ -78,8 +80,14 @@ async def extension_autofill_profile(
                 for p in parts:
                     if "@" in p:
                         contact = p
-                    elif any(c.isdigit() for c in p):
+                    elif any(c.isdigit() for c in p) and not "linkedin.com" in p and not "github.com" in p:
                         phone = p
+                    elif "linkedin.com" in p.lower():
+                        linkedin = p
+                    elif "github.com" in p.lower() or "portfolio" in p.lower():
+                        pass # Ignore github/portfolio for now
+                    else:
+                        location = p
     except Exception:
         pass
 
@@ -110,8 +118,8 @@ async def extension_autofill_profile(
             "last_name": " ".join(name.split()[1:]) if len(name.split()) > 1 else "",
             "email": current_user.email if "@" in current_user.email else contact,
             "phone": phone,
-            "linkedin": "",
-            "location": "",
+            "linkedin": linkedin,
+            "location": location,
             "work_authorization": "",
         },
         "screening_qa": qa[:50],

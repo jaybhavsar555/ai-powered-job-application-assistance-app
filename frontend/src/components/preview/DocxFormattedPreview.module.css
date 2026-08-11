@@ -35,17 +35,94 @@
 
 .docx-preview-scroll :global(.docx-wrapper > section.docx) {
   background: #fff !important;
-  color: #111 !important;
+  color: #000 !important;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
   margin: 0 !important;
   box-sizing: border-box;
   overflow: visible;
+  --foreground: 0 0% 0%;
+  --background: 0 0% 100%;
 }
 
-.docx-preview-scroll :global(.docx-preview-body),
-.docx-preview-scroll :global(.docx-preview-body *) {
-  color: inherit;
+.docx-preview-scroll :global(.docx-preview-body) {
+  color: #000 !important;
   max-width: 100%;
+  
+  /* Typography / spacing resets to fix Tailwind overriding DOCX defaults */
+  font-family: Calibri, Arial, "Times New Roman", sans-serif;
+  line-height: 1.15;
+  font-size: 11pt; /* Microsoft Word default base font size */
+}
+
+/* Restore Microsoft Word standard link color */
+.docx-preview-scroll :global(.docx-preview-body a) {
+  color: #0563c1 !important;
+  text-decoration: underline !important;
+}
+
+/* Restore basic paragraph spacing (Word defaults to 8pt) */
+.docx-preview-scroll :global(.docx-preview-body p) {
+  margin-top: 0;
+  margin-bottom: 8pt;
+}
+
+/* Restore headings */
+.docx-preview-scroll :global(.docx-preview-body h1),
+.docx-preview-scroll :global(.docx-preview-body h2),
+.docx-preview-scroll :global(.docx-preview-body h3),
+.docx-preview-scroll :global(.docx-preview-body h4) {
+  font-weight: bold;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Restore lists */
+.docx-preview-scroll :global(.docx-preview-body ul),
+.docx-preview-scroll :global(.docx-preview-body ol) {
+  margin-top: 0;
+  margin-bottom: 8pt;
+  padding-left: 2rem;
+}
+
+.docx-preview-scroll :global(.docx-preview-body ul) {
+  list-style-type: disc;
+}
+
+.docx-preview-scroll :global(.docx-preview-body ol) {
+  list-style-type: decimal;
+}
+
+.docx-preview-scroll :global(.docx-preview-body li) {
+  margin-bottom: 4pt;
+}
+
+/* Ensure strong/b are actually bold */
+.docx-preview-scroll :global(.docx-preview-body strong),
+.docx-preview-scroll :global(.docx-preview-body b) {
+  font-weight: bold !important;
+}
+
+/* Ensure i/em are actually italic */
+.docx-preview-scroll :global(.docx-preview-body i),
+.docx-preview-scroll :global(.docx-preview-body em) {
+  font-style: italic !important;
+}
+
+/* Restore table defaults */
+.docx-preview-scroll :global(.docx-preview-body table) {
+  border-collapse: collapse;
+}
+
+.docx-preview-scroll :global(.docx-preview-body td),
+.docx-preview-scroll :global(.docx-preview-body th) {
+  padding: 2px 4px;
+}
+
+/* Force text inside spans to be black if they accidentally got styled white by theme inheritance */
+.docx-preview-scroll :global(.docx-preview-body span[style*="color: rgb(255, 255, 255)"]),
+.docx-preview-scroll :global(.docx-preview-body span[style*="color: #ffffff"]),
+.docx-preview-scroll :global(.docx-preview-body span[style*="color: #fff"]) {
+  color: #000 !important;
 }
 
 .docx-preview-scroll :global(table) {

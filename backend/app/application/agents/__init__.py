@@ -15,10 +15,21 @@ from .outreach_draft_agent import OutreachDraftAgent
 from .job_discovery_agent import JobDiscoveryAgent
 from .skill_gap_agent import SkillGapAgent
 
+# Optional / experimental agents — must not break core imports
+try:
+    from .hallucination_agent import HallucinationAgent  # noqa: F401
+except Exception as exc:  # pragma: no cover
+    print(f"[Agents] hallucination_agent skipped: {exc}")
+
+try:
+    from .interview_prep_agent import InterviewPrepAgent  # noqa: F401
+except Exception as exc:  # pragma: no cover
+    print(f"[Agents] interview_prep_agent skipped: {exc}")
+
 __all__ = [
-    "CoverLetterAgent", 
-    "ResumeOptimizerAgent", 
-    "JobDiscoveryAgent", 
+    "CoverLetterAgent",
+    "ResumeOptimizerAgent",
+    "JobDiscoveryAgent",
     "RecruiterDiscoveryAgent",
-    "SkillGapAgent"
+    "SkillGapAgent",
 ]

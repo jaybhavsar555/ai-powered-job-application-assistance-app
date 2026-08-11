@@ -31,6 +31,9 @@ class DiscoveredJob(BaseModel):
     matchReason: str = Field(
         description="Why the user is a strong fit based on their resume"
     )
+    company_info: Optional[str] = Field(default=None, description="A brief blurb about the hiring firm extracted from the JD")
+    contact_info: Optional[str] = Field(default=None, description="Any recruiter name or email found in the JD")
+    full_jd: Optional[str] = Field(default=None, description="The full raw job description (populated server-side)")
     url: Optional[str] = Field(default=None, description="Canonical job posting URL")
     source: Optional[str] = Field(default=None, description="remotive|remoteok|arbeitnow")
     posted_at: Optional[str] = Field(default=None, description="ISO date if known")
@@ -69,6 +72,30 @@ class JobDiscoveryAgent:
         self.knowledge = knowledge_service
 
     async def fetch_remotive(self, search_term: str, limit: int) -> List[Dict[str, Any]]:
+        """
+        For each job:
+        1. Evaluate if it matches the User Preferences (especially Remote vs Hybrid vs Location, and strictly ensuring it is a relevant Tech Role).
+        2. Give it a matchScore from 0-100 based on how well the Resume aligns.
+        3. If it is NOT a Tech Role or completely violates the remote/hybrid preference, discard it.
+        4. CRITICAL: If the job appears EXPIRED, CLOSED, or is older than 30 days, discard it immediately.
+        5. Provide an analysis (pros and cons).
+
+        Return ONLY JSON in this format:
+        {
+          "recommendedJobs": [
+            {
+              "id": "exact id from the job posting",
+              "title": "exact title from the job posting",
+              "company": "exact company name",
+              "location": "location string",
+              "matchScore": 85,
+              "analysis": "Pros: ..., Cons: ...",
+              "firm_overview": "A brief AI-generated summary of what this firm does (if known)",
+              "contact_info": "Any recruiter contact info or apply URL found"
+            }
+          ]
+        }
+        """
         url = f"https://remotive.com/api/remote-jobs?search={search_term}"
         try:
             async with httpx.AsyncClient(headers={"User-Agent": "CareerOS/1.0"}) as client:
@@ -203,13 +230,60 @@ class JobDiscoveryAgent:
             logger.error("Arbeitnow fetch failed: %s", e)
             return []
 
-    async def fetch_live_jobs(self, target_roles: str) -> List[Dict[str, Any]]:
+    async def fetch_vault_portals(self, search_term: str, location: str, limit: int) -> List[Dict[str, Any]]:
+        from app.core.job_portals import JOB_PORTALS
+        import urllib.parse
+        from bs4 import BeautifulSoup
+        
+        # Build query: site:instahyre.com OR site:wellfound.com "Software Engineer" "hybrid"
+        site_str = " OR ".join([f"site:{urllib.parse.urlparse(p['url']).netloc}" for p in JOB_PORTALS[:10]])
+        query = f'({site_str} OR "careers") "{search_term}" "{location}"'
+        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}&df=m"
+        
+        try:
+            async with httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}) as client:
+                response = await client.get(url, timeout=12.0)
+                if response.status_code != 200:
+                    return []
+                soup = BeautifulSoup(response.text, "html.parser")
+                results = soup.find_all("a", class_="result__url")
+                snippets = soup.find_all("a", class_="result__snippet")
+                
+                out = []
+                for i in range(min(limit, len(results))):
+                    link = results[i].get("href")
+                    if link and "uddg=" in link:
+                        link = urllib.parse.unquote(link.split("uddg=")[1].split("&")[0])
+                    elif link and link.startswith("/"):
+                        link = f"https://duckduckgo.com{link}"
+                        
+                    snippet = snippets[i].get_text(strip=True) if i < len(snippets) else ""
+                    
+                    if link:
+                        out.append({
+                            "id": f"vault-{hash(link)}",
+                            "title": f"Vault Match: {search_term.title()}", 
+                            "company_name": "Vault Job Portal",
+                            "candidate_required_location": location or "Hybrid/Remote",
+                            "salary": "Competitive",
+                            "url": link,
+                            "description": snippet,
+                            "publication_date": None,
+                            "source": "vault_portals",
+                        })
+                return out
+        except Exception as e:
+            logger.error("Vault portal fetch failed: %s", e)
+            return []
+
+    async def fetch_live_jobs(self, target_roles: str, is_remote: bool, location_hubs: list[str]) -> List[Dict[str, Any]]:
         settings = get_settings()
         search_term = (
             target_roles.split(",")[0].strip() if target_roles else "software engineer"
         )
+        location = "Remote" if is_remote else (location_hubs[0] if location_hubs else "Hybrid")
         per = max(2, int(settings.JOB_DISCOVERY_PER_SOURCE or 4))
-        sources = settings.job_discovery_source_list() or ["remotive"]
+        sources = settings.job_discovery_source_list() or ["remotive", "vault_portals"]
         combined: List[Dict[str, Any]] = []
         seen_urls: set[str] = set()
 
@@ -217,6 +291,7 @@ class JobDiscoveryAgent:
             "remotive": self.fetch_remotive,
             "remoteok": self.fetch_remoteok,
             "arbeitnow": self.fetch_arbeitnow,
+            "vault_portals": lambda term, limit: self.fetch_vault_portals(term, location, limit),
         }
         for src in sources:
             fn = fetchers.get(src)
@@ -256,7 +331,9 @@ class JobDiscoveryAgent:
         resume_text = extract_text(files[0].path)[:6000] if files else "No resume provided."
 
         target_roles = preferences.get("targetRoles", "")
-        live_jobs = await self.fetch_live_jobs(target_roles)
+        is_remote = preferences.get("isRemote", True)
+        location_hubs = preferences.get("locationHubs", [])
+        live_jobs = await self.fetch_live_jobs(target_roles, is_remote, location_hubs)
         source_meta = {str(j.get("id")): j for j in live_jobs}
 
         if not live_jobs:
@@ -278,7 +355,7 @@ class JobDiscoveryAgent:
                     f"Description: {clean_desc}\n"
                 )
             jobs_context = (
-                "Below are ACTUAL LIVE JOB POSTINGS from Remotive / RemoteOK / Arbeitnow.\n"
+                "Below are ACTUAL LIVE JOB POSTINGS from Remotive / RemoteOK / Vault Portals.\n"
                 "You MUST use these exact jobs (keep ID, Company, Title, URL, Source).\n\n"
                 + "\n---\n".join(formatted_jobs)
             )
@@ -299,7 +376,10 @@ class JobDiscoveryAgent:
         2. matchScore 70-99 from resume fit.
         3. matchReason 1-2 sentences referencing resume skills.
         4. Short description summary.
-        5. Set posted_at from Posted when available.
+        5. Extract `company_info` (1-2 sentences about the firm, if found).
+        6. Extract `contact_info` (recruiter email or name, if found).
+        7. Set posted_at from Posted when available.
+        8. CRITICAL: If the job appears EXPIRED, CLOSED, or is older than 30 days, discard it immediately.
         """
 
         messages = [
@@ -381,6 +461,13 @@ class JobDiscoveryAgent:
                 continue
             seen.add(key)
             dumped["applyable"] = bool(url)
+            
+            # Inject the raw description from the API as full_jd so UI can display it
+            if meta.get("description"):
+                dumped["full_jd"] = clean_html(meta.get("description", ""))
+            else:
+                dumped["full_jd"] = desc
+
             jobs.append(dumped)
 
         logger.info(

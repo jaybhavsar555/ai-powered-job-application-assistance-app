@@ -1,0 +1,36 @@
+{
+  "timestamp": 6480.125022814,
+  "provider": "ollama",
+  "model": "qwen2.5:3b",
+  "average_consistency": 8.666666666666666,
+  "passed": true,
+  "details": [
+    {
+      "test_case": "Backend Role Match",
+      "scores": {
+        "factual_consistency": 9,
+        "relevance": 8,
+        "formatting": 10
+      },
+      "explanation": "Factual Consistency: All claims are derived from or present in the Base Resume (Python, Django, PostgreSQL). Relevance: FastAPI and AWS skills align with JD requirements. Formatting: Structured JSON follows requested format."
+    },
+    {
+      "test_case": "Frontend Role Match",
+      "scores": {
+        "factual_consistency": 9,
+        "relevance": 8,
+        "formatting": 10
+      },
+      "explanation": "Factual Consistency: All claims are directly from or derived from the Base Resume.\nRelevance: Skills and experience align well with JD requirements, including TypeScript.\nFormatting: Structured and clean JSON format."
+    },
+    {
+      "test_case": "Unrelated Role (Rejection Test)",
+      "scores": {
+        "factual_consistency": 8,
+        "relevance": 9,
+        "formatting": 10
+      },
+      "explanation": "Factual Consistency: Claims align with Base Resume; Relevance: Emphasizes relevant skills for Game Development; Formatting: Structured and clean JSON."
+    }
+  ]
+}

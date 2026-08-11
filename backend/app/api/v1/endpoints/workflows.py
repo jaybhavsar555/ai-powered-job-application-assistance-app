@@ -8,7 +8,9 @@ import logging
 from app.core.config import get_settings
 from app.domain.models import User
 from app.application.services.workflow import WorkflowService
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, get_db
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.checkpoints import checkpointer_status
 from app.workflows.graph import graph_backend
 
@@ -113,11 +115,40 @@ async def analyze_jd_skills(
     if file_path.exists():
         resume_text = extract_text(file_path)
 
-    job_text = request.job_description
+    job_text = request.job_description.strip()
+    scrape_source = None
+    scrape_warning = None
+
     if request.job_url:
         scraped = await scrape_job_page(request.job_url)
-        if scraped.text:
-            job_text = scraped.text + "\n" + job_text
+        if scraped.source == "mock":
+            # Scraping failed — mock body is generic and will hallucinate results.
+            # Only fall back to it if the user didn't provide a manual JD either.
+            if job_text:
+                scrape_warning = (
+                    f"Could not scrape the URL ({scraped.error or 'page blocked or JS-heavy'}). "
+                    "Analysis is based on your pasted job description only."
+                )
+                scrape_source = "manual_jd_only"
+                # job_text already set from request.job_description; don't prepend mock body
+            else:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Could not scrape that URL (the page may be blocked or require a login). "
+                        "Please paste the job description text manually and try again."
+                    ),
+                )
+        else:
+            # Real scraped content — prepend it to any manual JD text
+            scrape_source = scraped.source
+            job_text = scraped.text + ("\n" + job_text if job_text else "")
+
+    if not job_text:
+        raise HTTPException(
+            status_code=422,
+            detail="Please provide a job description (paste text or a scrapable URL)."
+        )
 
     agent = SkillGapAgent()
     gap = await agent.run(
@@ -126,14 +157,28 @@ async def analyze_jd_skills(
             "job_description": job_text[:12000],
         }
     )
-    
-    return {"status": "ok", "skill_gap": gap.get("skill_gap", {})}
+    skill_gap = gap.get("skill_gap", {})
+    return {
+        "status": "ok",
+        "skill_gap": skill_gap,
+        "match_score": skill_gap.get("match_score", 0),
+        "rationale": skill_gap.get("rationale", ""),
+        "skill_impacts": skill_gap.get("skill_impacts", []),
+        "present_skills": skill_gap.get("present_skills", []),
+        "nice_to_have_missing": skill_gap.get("nice_to_have_missing", []),
+        "qualifications_match": skill_gap.get("qualifications_match", ""),
+        "scrape_source": scrape_source,
+        "scrape_warning": scrape_warning,
+    }
 
 class TailorResumeRequest(BaseModel):
     job_description: str
     job_url: Optional[str] = None
     base_resume: str
     approved_skills: Optional[list[str]] = None
+    # Iterative mode: pass the text of the already-tailored resume as the new base
+    current_tailored_text: Optional[str] = None
+    before_ats_score: Optional[int] = None
 
 @router.post("/tailor-resume")
 async def tailor_resume_manual(
@@ -141,6 +186,7 @@ async def tailor_resume_manual(
     current_user: User = Depends(get_current_user)
 ):
     from app.application.agents.resume_optimizer import ResumeOptimizerAgent
+    from app.application.agents.skill_gap_agent import SkillGapAgent
     from app.infrastructure.resume_library import extract_text, missing_skills_from_job
     from app.infrastructure.scraping import scrape_job_page
     from pathlib import Path
@@ -148,7 +194,10 @@ async def tailor_resume_manual(
     source_dir = Path(settings.RESUME_SOURCE_DIR)
     file_path = source_dir / request.base_resume
     
-    if not file_path.exists():
+    if request.current_tailored_text:
+        # Iterative mode: use the already-tailored text as the base
+        resume_text = request.current_tailored_text
+    elif not file_path.exists():
         resume_text = "Senior Software Engineer with 5 years of experience."
     else:
         resume_text = extract_text(file_path)
@@ -171,8 +220,29 @@ async def tailor_resume_manual(
             "job_description": job_text[:12000],
         }
     )
+    optimized = opt.get("optimized_resume", {})
+
+    # Auto-score the tailored resume to get the "after" ATS score
+    tailored_text = "\n".join([
+        optimized.get("summary", ""),
+        *optimized.get("tailored_bullets", []),
+        *optimized.get("added_keywords", []),
+    ])
+    gap_agent = SkillGapAgent()
+    after_gap = await gap_agent.run(
+        {
+            "resume_json": tailored_text[:6000],
+            "job_description": job_text[:6000],
+        }
+    )
+    after_score = after_gap.get("skill_gap", {}).get("match_score", 0)
     
-    return {"status": "ok", "optimized_resume": opt.get("optimized_resume", {})}
+    return {
+        "status": "ok",
+        "optimized_resume": optimized,
+        "before_ats_score": request.before_ats_score,
+        "after_ats_score": after_score,
+    }
 
 
 class DiscoverRequest(BaseModel):
@@ -326,3 +396,74 @@ async def analyze_resumes(
             "source": "fallback_error",
             "note": "Analysis failed — showing defaults. Try uploading a resume.",
         }
+
+
+class ChatUpdateRequest(BaseModel):
+    chat_message: str
+    base_resume: Optional[str] = None
+
+@router.post("/chat-update")
+async def chat_update_profile(
+    request: ChatUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    from app.application.agents.profile_updater_agent import ProfileUpdaterAgent
+    from app.infrastructure.resume_library import extract_text, list_resume_files
+    from app.application.services.screening_qa import ScreeningQAService
+    from pathlib import Path
+    
+    source_dir = Path(settings.RESUME_SOURCE_DIR)
+    
+    file_path = None
+    if request.base_resume:
+        file_path = source_dir / request.base_resume
+    else:
+        files = list_resume_files(source_dir)
+        if files:
+            file_path = files[0].path
+            
+    if not file_path or not file_path.exists():
+        return {"status": "error", "message": "No base resume found to update."}
+        
+    resume_text = extract_text(file_path)
+    
+    agent = ProfileUpdaterAgent()
+    result = await agent.run(
+        {
+            "chat_message": request.chat_message,
+            "resume_text": resume_text,
+        }
+    )
+    
+    updated_resume_text = result.get("updated_resume_text", "")
+    qa_updates = result.get("qa_updates", [])
+    agent_reply = result.get("agent_reply", "")
+    
+    # 1. Overwrite the Master Resume if it was updated
+    if updated_resume_text and updated_resume_text != resume_text:
+        # We assume the base_resume is a txt or md file that can be rewritten.
+        # If it's a PDF or DOCX, we write a corresponding .md file next to it.
+        if file_path.suffix.lower() in [".txt", ".md"]:
+            file_path.write_text(updated_resume_text, encoding="utf-8")
+        else:
+            md_path = file_path.with_suffix(".md")
+            md_path.write_text(updated_resume_text, encoding="utf-8")
+            
+    # 2. Update QA Profile
+    if qa_updates:
+        qa_svc = ScreeningQAService(db)
+        # For simplicity, we just create new items or you could check if they exist by question
+        for qa in qa_updates:
+            await qa_svc.create(
+                user_id=current_user.id,
+                question=qa.get("question", ""),
+                answer=qa.get("answer", ""),
+                tags=qa.get("tags", [])
+            )
+            
+    return {
+        "status": "ok",
+        "agent_reply": agent_reply,
+        "qa_updates": qa_updates
+    }

@@ -24,7 +24,7 @@ export type WorkflowEvent = {
   [key: string]: unknown;
 };
 
-export type WorkflowFinalState = {
+export interface WorkflowFinalState {
   job_id?: string;
   user_id?: string;
   cover_letter?: string | { content?: string };
@@ -32,14 +32,58 @@ export type WorkflowFinalState = {
     summary?: string;
     tailored_bullets?: string[];
     added_keywords?: string[];
+    // added for comparison UI
+    text?: string;
+    fileUrl?: string;
   };
   ats_score?: number;
+  ats_recommendation?: string;
   missing_skills?: string[];
   company_research?: Record<string, unknown>;
   job_details?: Record<string, unknown>;
   requires_human_approval?: boolean;
   [key: string]: unknown;
-};
+}
+
+export interface SkillImpact {
+  skill: string;
+  level: "high" | "medium" | "low";
+  reason: string;
+  jd_mentions?: number;
+}
+
+export interface SkillPresent {
+  skill: string;
+  confidence: "strong" | "partial";
+  note?: string;
+}
+
+export interface NiceToHaveSkill {
+  skill: string;
+  reason: string;
+}
+
+export interface TailorState {
+  step: 1 | 2 | 3;
+  jdText: string;
+  jobUrl: string;
+  selectedBaseResume: string;
+  proposedSkills: string[];
+  approvedSkills: string[];
+  // ATS scoring
+  beforeAtsScore: number | null;
+  afterAtsScore: number | null;
+  rationale: string;
+  skillImpacts: SkillImpact[];
+  // Comprehensive analysis
+  presentSkills: SkillPresent[];
+  niceToHaveMissing: NiceToHaveSkill[];
+  qualificationsMatch: string;
+  // Iterative improvement
+  previouslyAddedSkills: string[];
+  iterativeMode: boolean;
+  iterativeTailoredText: string;
+}
 
 interface WorkflowState {
   /** Currently executing agent (from SSE) */
@@ -50,15 +94,39 @@ interface WorkflowState {
   workflowStatus: 'idle' | 'running' | 'completed' | 'error';
   events: WorkflowEvent[];
   finalState: WorkflowFinalState | null;
+  // Store original resume preview for comparison
+  originalResumeData: { text: string; fileUrl?: string } | null;
+  tailorState: TailorState;
 
   setActiveNode: (node: string | null) => void;
   setSelectedNode: (node: string | null) => void;
   setNodeTelemetry: (node: string, data: Partial<NodeTelemetry>) => void;
   setWorkflowStatus: (status: 'idle' | 'running' | 'completed' | 'error') => void;
   setFinalState: (state: WorkflowFinalState | null) => void;
+  setOriginalResumeData: (data: { text: string; fileUrl?: string } | null) => void;
+  setTailorState: (state: Partial<TailorState>) => void;
   addEvent: (event: WorkflowEvent) => void;
   reset: () => void;
 }
+
+const initialTailorState: TailorState = {
+  step: 1,
+  jdText: "",
+  jobUrl: "",
+  selectedBaseResume: "",
+  proposedSkills: [],
+  approvedSkills: [],
+  beforeAtsScore: null,
+  afterAtsScore: null,
+  rationale: "",
+  skillImpacts: [],
+  presentSkills: [],
+  niceToHaveMissing: [],
+  qualificationsMatch: "",
+  previouslyAddedSkills: [],
+  iterativeMode: false,
+  iterativeTailoredText: "",
+};
 
 export const useWorkflowStore = create<WorkflowState>((set) => ({
   activeNode: null,
@@ -67,6 +135,8 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
   workflowStatus: 'idle',
   events: [],
   finalState: null,
+  originalResumeData: null,
+  tailorState: initialTailorState,
 
   setActiveNode: (node) => set({ activeNode: node }),
   setSelectedNode: (node) => set({ selectedNode: node }),
@@ -87,6 +157,10 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
 
   setFinalState: (state) => set({ finalState: state }),
 
+  setOriginalResumeData: (data) => set({ originalResumeData: data }),
+
+  setTailorState: (state) => set((s) => ({ tailorState: { ...s.tailorState, ...state } })),
+
   addEvent: (event) => set((state) => ({ events: [...state.events, event] })),
 
   reset: () =>
@@ -98,5 +172,7 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
       workflowStatus: 'idle',
       events: [],
       finalState: null,
+      originalResumeData: null,
+      tailorState: initialTailorState,
     })),
 }));

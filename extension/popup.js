@@ -6,18 +6,67 @@ const emailEl = document.getElementById("email");
 const passwordEl = document.getElementById("password");
 const consentEl = document.getElementById("consent");
 const statusEl = document.getElementById("status");
+const loginSection = document.getElementById("loginSection");
+const actionSection = document.getElementById("actionSection");
 
 function setStatus(msg, ok) {
   statusEl.textContent = msg;
-  statusEl.className = ok ? "ok" : "err";
+  statusEl.className = "status-box show " + (ok ? "status-ok" : "status-err");
 }
 
-chrome.storage.local.get(["apiBase", "token", "autoConsent", "email"], (data) => {
+function setLoading(btnId, isLoading) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  if (isLoading) {
+    btn.classList.add("is-loading");
+    btn.disabled = true;
+  } else {
+    btn.classList.remove("is-loading");
+    btn.disabled = false;
+  }
+}
+
+chrome.storage.local.get(["apiBase", "token", "autoConsent", "email"], async (data) => {
   apiBaseEl.value = data.apiBase || DEFAULT_API;
   tokenEl.value = data.token || "";
   emailEl.value = data.email || "";
   consentEl.checked = !!data.autoConsent;
+  
+  if (data.token) {
+    await verifyToken(apiBaseEl.value, data.token);
+  } else {
+    showLogin(true);
+  }
 });
+
+function showLogin(show) {
+  if (show) {
+    loginSection.style.display = "block";
+    actionSection.style.display = "none";
+  } else {
+    loginSection.style.display = "none";
+    actionSection.style.display = "block";
+  }
+}
+
+async function verifyToken(apiBase, token) {
+  try {
+    const res = await fetch(`${apiBase}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (res.ok) {
+      showLogin(false);
+      setStatus("Logged in via saved session.", true);
+    } else {
+      showLogin(true);
+      setStatus("Session expired. Please log in again.", false);
+      chrome.storage.local.remove("token");
+    }
+  } catch (err) {
+    showLogin(true);
+    setStatus("Failed to verify session.", false);
+  }
+}
 
 async function syncConsentToServer(apiBase, token, consent) {
   if (!token) return;
@@ -54,6 +103,7 @@ document.getElementById("login").addEventListener("click", async () => {
     setStatus("Enter email and password", false);
     return;
   }
+  setLoading("login", true);
   try {
     const res = await fetch(`${apiBase}/auth/login`, {
       method: "POST",
@@ -73,6 +123,7 @@ document.getElementById("login").addEventListener("click", async () => {
     tokenEl.value = token;
     passwordEl.value = "";
     await savePrefs({ apiBase, token, autoConsent, email });
+    showLogin(false);
     setStatus(
       autoConsent
         ? "Logged in. Auto Apply consent ON."
@@ -81,7 +132,17 @@ document.getElementById("login").addEventListener("click", async () => {
     );
   } catch (err) {
     setStatus(String(err?.message || err), false);
+  } finally {
+    setLoading("login", false);
   }
+});
+
+document.getElementById("logout").addEventListener("click", () => {
+  chrome.storage.local.remove("token");
+  tokenEl.value = "";
+  passwordEl.value = "";
+  showLogin(true);
+  setStatus("Logged out.", true);
 });
 
 document.getElementById("save").addEventListener("click", async () => {
@@ -99,7 +160,9 @@ document.getElementById("save").addEventListener("click", async () => {
 });
 
 document.getElementById("test").addEventListener("click", () => {
+  setLoading("test", true);
   chrome.runtime.sendMessage({ type: "FETCH_PROFILE" }, (res) => {
+    setLoading("test", false);
     if (chrome.runtime.lastError) {
       setStatus(chrome.runtime.lastError.message, false);
       return;
@@ -116,9 +179,13 @@ document.getElementById("test").addEventListener("click", () => {
 });
 
 async function fillActiveTab(autoSubmit) {
+  const btnId = autoSubmit ? "auto" : "fill";
+  setLoading(btnId, true);
+  
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
     setStatus("No active tab", false);
+    setLoading(btnId, false);
     return;
   }
   try {
@@ -134,6 +201,7 @@ async function fillActiveTab(autoSubmit) {
     } catch (_) {}
   } catch (err) {
     setStatus("Cannot access this page (Chrome restricted).", false);
+    setLoading(btnId, false);
     return;
   }
 
@@ -160,6 +228,7 @@ async function fillActiveTab(autoSubmit) {
           true
         );
       }
+      setLoading(btnId, false);
     }
   );
 }

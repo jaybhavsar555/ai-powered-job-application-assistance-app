@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Users, Search, Copy, Linkedin, Mail, Building2 } from "lucide-react";
+import { Users, Search, Copy, Linkedin, Mail } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 
 interface Recruiter {

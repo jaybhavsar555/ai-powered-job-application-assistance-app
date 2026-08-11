@@ -176,15 +176,23 @@ export default function ApplyStudioPage() {
         if (res.ok) {
           const data = await res.json();
           if (!cancelled) {
+            type JobListItem = {
+              id: string;
+              role_title?: string | null;
+              company_name?: string | null;
+              description_normalized?: { company_name?: string } | null;
+            };
             setJobs(
-              (Array.isArray(data) ? data : []).slice(0, 12).map((j: any) => ({
-                id: j.id,
-                role_title: j.role_title,
-                company:
-                  j.description_normalized?.company_name ||
-                  j.company_name ||
-                  "Unknown company",
-              }))
+              (Array.isArray(data) ? (data as JobListItem[]) : [])
+                .slice(0, 12)
+                .map((j) => ({
+                  id: j.id,
+                  role_title: j.role_title ?? null,
+                  company:
+                    j.description_normalized?.company_name ||
+                    j.company_name ||
+                    "Unknown company",
+                }))
             );
           }
         }

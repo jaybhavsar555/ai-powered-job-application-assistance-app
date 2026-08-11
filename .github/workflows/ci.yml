@@ -43,10 +43,24 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: aijobdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U user -d aijobdb"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       DATABASE_URL: postgresql+asyncpg://user:password@localhost:5432/aijobdb
       REDIS_URL: redis://localhost:6379/0
-      SECRET_KEY: ci-test-secret
+      SECRET_KEY: ci-test-secret-at-least-32-characters-long
       OPENAI_API_KEY: sk-test-placeholder
       LLM_FORCE_MOCK: "true"
       CHECKPOINT_BACKEND: memory
@@ -73,6 +87,23 @@ jobs:
 
       - name: Verify app imports
         run: python -c "from app.main import app; print('app ok', app.title)"
+        env:
+          PYTHONPATH: .
+
+      - name: Create database schema
+        run: |
+          python - <<'PY'
+          import asyncio
+          from app.infrastructure.db.models import Base
+          from app.infrastructure.db.session import engine
+
+          async def main():
+              async with engine.begin() as conn:
+                  await conn.run_sync(Base.metadata.create_all)
+              print("schema ok")
+
+          asyncio.run(main())
+          PY
         env:
           PYTHONPATH: .
 

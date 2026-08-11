@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { 
-  LineChart, Activity, BrainCircuit, DollarSign, Clock, CheckCircle, 
-  XCircle, Filter, Zap
+  Activity, BrainCircuit, DollarSign, Clock, CheckCircle, 
+  Filter, Zap
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 
@@ -139,7 +139,7 @@ export default function AnalyticsPage() {
             <h2 className="text-xl font-semibold">Application Funnel</h2>
           </div>
           <div className="flex-1 flex flex-col justify-center space-y-6">
-            {pipelineStages.map((stage, idx) => {
+            {pipelineStages.map((stage) => {
               const count = getPipelineCount(stage);
               const percentage = Math.max((count / totalPipeline) * 100, 2); // min width 2%
               return (

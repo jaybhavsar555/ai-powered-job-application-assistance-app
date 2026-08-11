@@ -205,9 +205,9 @@ export function InspectorPanel() {
           asideWidth,
           showAsOverlay
             ? wideForPdf
-              ? "fixed inset-y-0 right-0 z-50 w-[min(100vw,100%)] sm:w-[min(100vw,28rem)] md:w-[min(100vw,36rem)] shadow-2xl lg:static lg:z-auto lg:w-auto lg:shadow-none"
-              : "fixed inset-y-0 right-0 z-50 w-[min(100vw,28rem)] sm:w-[min(100vw,32rem)] shadow-2xl lg:static lg:z-auto lg:w-auto lg:shadow-none"
-            : "hidden lg:flex",
+              ? "fixed inset-y-0 right-0 z-50 w-[min(100vw,100%)] sm:w-[min(100vw,28rem)] md:w-[min(100vw,36rem)] shadow-2xl lg:relative lg:z-[60] lg:w-auto lg:shadow-none"
+              : "fixed inset-y-0 right-0 z-50 w-[min(100vw,28rem)] sm:w-[min(100vw,32rem)] shadow-2xl lg:relative lg:z-[60] lg:w-auto lg:shadow-none"
+            : "hidden lg:flex lg:relative lg:z-[60]",
         ].join(" ")}
       >
         {/* Tabs */}

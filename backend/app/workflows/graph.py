@@ -215,6 +215,40 @@ async def resume_optimization_node(state: AgentState):
             f"Successfully added keywords: {', '.join(opt_res.get('added_keywords', []))}",
         ],
         "tailored_resume": opt_res,
+        "resume_json": base_resume,
+    }
+
+
+async def hallucination_check_node(state: AgentState):
+    agent = agent_registry.get_agent("hallucination_checker")
+    
+    agent_state = {
+        "resume_json": state.get("resume_json", ""),
+        "tailored_resume": state.get("tailored_resume", {}),
+    }
+
+    result = await agent.execute(agent_state, application_id=state.get("job_id"))
+    report = result.get("hallucination_report", {})
+    
+    msgs = ["Factual consistency check passed."]
+    if report.get("has_hallucination"):
+        msgs = [f"Hallucination Warning: {', '.join(report.get('hallucinated_claims', []))}"]
+        
+        try:
+            from app.application.services.workflow_persistence import persist_ats_and_approval_flags
+            async with async_session() as session:
+                # Update approval flags in the database so the UI can warn the user
+                await persist_ats_and_approval_flags(
+                    session,
+                    job_id=state.get("job_id"),
+                    requires_human_approval=True,
+                )
+        except Exception as e:
+            print(f"[persist] hallucination flag failed: {e}")
+
+    return {
+        "messages": msgs,
+        "hallucination_report": report
     }
 
 
@@ -316,6 +350,7 @@ def build_graph(checkpointer=None, *, backend: str = "memory"):
     workflow.add_node("Company Research Agent", company_research_node)
     workflow.add_node("ATS Analyzer", ats_analysis_node)
     workflow.add_node("Resume Optimizer", resume_optimization_node)
+    workflow.add_node("Hallucination Checker", hallucination_check_node)
     workflow.add_node("Cover Letter Agent", cover_letter_node)
     workflow.add_node("Recruiter Discovery Agent", recruiter_discovery_node)
     workflow.add_node("Outreach Draft Agent", outreach_draft_node)
@@ -328,8 +363,9 @@ def build_graph(checkpointer=None, *, backend: str = "memory"):
     workflow.add_edge("Memory Retrieval Node", "ATS Analyzer")
     
     workflow.add_edge("ATS Analyzer", "Resume Optimizer")
-    # Cover letter waits for both resume + company research (LangGraph join).
-    workflow.add_edge("Resume Optimizer", "Cover Letter Agent")
+    workflow.add_edge("Resume Optimizer", "Hallucination Checker")
+    # Cover letter waits for both hallucination check + company research (LangGraph join).
+    workflow.add_edge("Hallucination Checker", "Cover Letter Agent")
     workflow.add_edge("Company Research Agent", "Cover Letter Agent")
     
     # New flow: Cover Letter -> Recruiter Discovery -> Outreach Draft -> END
