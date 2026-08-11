@@ -17,13 +17,18 @@ class ResumeOptimizerAgent(OSAgent):
     capabilities = ["write"]
 
     def _mock(self, missing_skills: List[str]) -> OptimizedResume:
-        skills = missing_skills or ["FastAPI", "Docker", "AWS"]
+        skills = [s for s in (missing_skills or []) if s][:6]
+        skill_line = ", ".join(skills) if skills else "core stack listed in the JD"
         return OptimizedResume(
-            summary="Senior Backend Engineer with 5+ years experience building highly scalable microservices using Python, FastAPI, Docker, and AWS.",
+            summary=(
+                f"Engineer with hands-on delivery experience; emphasizing "
+                f"{skill_line} to match this role. "
+                "(AI was unavailable — keyword-focused draft; re-run Tailor when LLM is free.)"
+            ),
             tailored_bullets=[
-                "Architected and deployed scalable REST APIs using FastAPI and Docker, reducing latency by 40%.",
-                "Integrated PostgreSQL databases with SQLAlchemy for robust data persistence.",
-                "Deployed containerized applications to AWS ECS ensuring 99.9% uptime.",
+                f"Delivered production features using {skills[0]}." if skills else "Delivered production features aligned to the role requirements.",
+                f"Collaborated across teams while applying {skills[1]}." if len(skills) > 1 else "Collaborated with product and design to ship user-facing work.",
+                "Owned debugging, testing, and iterative improvement of shipped features.",
             ],
             added_keywords=skills[:5],
         )

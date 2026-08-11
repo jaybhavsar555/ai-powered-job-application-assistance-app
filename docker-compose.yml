@@ -9,6 +9,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -16,6 +17,7 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    restart: unless-stopped
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -23,12 +25,12 @@ services:
       - "6333:6333"
     volumes:
       - qdrant_data:/qdrant/storage
+    restart: unless-stopped
 
-  # Local OpenAI-compatible LLM (free, no cloud credits)
-  # Pull a model after first start:
+  # Local OpenAI-compatible LLM (free, no cloud credits).
+  # After first start, pull a model (CPU works; GPU optional — see docker-compose.gpu.yml):
   #   docker compose exec ollama ollama pull qwen2.5:3b
-  #   docker compose exec ollama ollama pull nomic-embed-text
-  # Prefer qwen2.5:3b on 4GB GPUs (e.g. GTX 1650 Ti). 7b often spills to CPU.
+  # Prefer qwen2.5:3b on modest machines. 7b needs more RAM.
   ollama:
     image: ollama/ollama:latest
     ports:
@@ -36,32 +38,20 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     environment:
-      # Keep the active model resident between agent calls (avoids ~8s reload each time)
       OLLAMA_KEEP_ALIVE: "-1"
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility
-    # Docker Desktop + NVIDIA Container Toolkit
-    gpus: all
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    # Hot-reload against bind-mounted source (packages stay in the image — no local venv)
+    # Hot-reload against bind-mounted source (Python packages stay in the image)
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - ./backend:/app
-      # Host resume library ↔ container (packages written back to your Downloads folder)
-      - "C:\\Users\\Asus\\Downloads\\resume based on JD:/data/resumes"
-      - "./data/packages:/data/packages"
+      # Put your base resumes (PDF/DOCX/MD) in ./data/resumes on the host
+      - ./data/resumes:/data/resumes
+      - ./data/packages:/data/packages
     environment:
       # Docker DNS names (override localhost values from backend/.env)
       DATABASE_URL: postgresql+asyncpg://user:password@db:5432/aijobdb
@@ -69,8 +59,15 @@ services:
       QDRANT_URL: http://qdrant:6333
       OLLAMA_BASE_URL: http://ollama:11434/v1
       OLLAMA_MODEL: qwen2.5:3b
-      OLLAMA_TIMEOUT_SECONDS: "180"
+      OLLAMA_TIMEOUT_SECONDS: "300"
       OLLAMA_MAX_TOKENS: "400"
+      # LLM_PROVIDER comes from backend/.env (tokenharbor | ollama | openai)
+      LLM_FORCE_MOCK: "false"
+      LLM_ALLOW_MOCK: "false"
+      JOB_DISCOVERY_SOURCES: vault_portals,remotive,remoteok,arbeitnow
+      JOB_DISCOVERY_PER_SOURCE: "3"
+      JOB_DISCOVERY_VAULT_LIMIT: "12"
+      JOB_DISCOVERY_MAX_RESULTS: "15"
       RESUME_SOURCE_DIR: /data/resumes
       APPLICATION_PACKAGE_DIR: /data/packages
       ENVIRONMENT: development

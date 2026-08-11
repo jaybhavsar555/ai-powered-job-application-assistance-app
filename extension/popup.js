@@ -174,7 +174,11 @@ document.getElementById("test").addEventListener("click", () => {
     const name = res.profile?.profile?.full_name || "?";
     const mode = res.profile?.mode || "?";
     const qa = res.profile?.screening_qa?.length || 0;
-    setStatus(`OK · ${name} · ${mode} · ${qa} Q&A`, true);
+    const resume = res.profile?.resume;
+    const resumeBit = resume?.available
+      ? `resume:${resume.source || "yes"}`
+      : "resume:missing";
+    setStatus(`OK · ${name} · ${mode} · ${qa} Q&A · ${resumeBit}`, true);
   });
 });
 

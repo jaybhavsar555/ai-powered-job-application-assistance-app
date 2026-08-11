@@ -179,6 +179,18 @@ def test_llm_telemetry_records_mock_fallback():
     assert after["by_reason"].get("unit_test", 0) >= 1
 
 
+def test_llm_telemetry_records_failure_not_as_mock():
+    from app.infrastructure.llm import telemetry as tel
+
+    before_f = tel.telemetry_snapshot().get("failures", 0)
+    before_m = tel.telemetry_snapshot()["mock_fallbacks"]
+    tel.record_llm_failure(reason="TimeoutError", provider="ollama", model="qwen2.5:3b")
+    after = tel.telemetry_snapshot()
+    assert after["failures"] == before_f + 1
+    assert after["mock_fallbacks"] == before_m
+    assert after["failure_by_reason"].get("TimeoutError", 0) >= 1
+
+
 def test_demo_auth_disabled_in_production():
     s = Settings(
         ENVIRONMENT="production",

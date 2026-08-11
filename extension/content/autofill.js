@@ -195,6 +195,87 @@ if (!window.__CAREER_OS_AUTOFILL_LOADED) {
     setTimeout(() => el.classList.remove("career-os-show"), 4000);
   }
 
+  function isResumeFileInput(el) {
+    if (!el || el.type !== "file") return false;
+    const blob =
+      norm(labelFor(el)) +
+      " " +
+      norm(el.getAttribute("name")) +
+      " " +
+      norm(el.getAttribute("id")) +
+      " " +
+      norm(el.getAttribute("accept")) +
+      " " +
+      norm(el.closest("label, .form-group, [data-testid], fieldset")?.textContent || "");
+    if (
+      /cover.?letter|transcript|portfolio|headshot|photo|avatar/.test(blob) &&
+      !/resume|cv|curriculum/.test(blob)
+    ) {
+      return false;
+    }
+    if (/resume|cv|curriculum|upload.?resume|attach.?resume/.test(blob)) {
+      return true;
+    }
+    if (el.accept && /pdf|msword|officedocument/.test(norm(el.accept))) return true;
+    return false;
+  }
+
+  function findResumeFileInputs() {
+    const all = [...document.querySelectorAll("input[type=file]")];
+    const preferred = all.filter(isResumeFileInput);
+    if (preferred.length) return preferred;
+    // Single unlabeled file input (common on simple ATS) — try it
+    return all.length === 1 ? all : [];
+  }
+
+  function attachFileToInput(input, file) {
+    try {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      input.files = dt.files;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return input.files && input.files.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  async function fetchResumeBlob(applicationId) {
+    const res = await new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: "FETCH_RESUME_FILE", applicationId: applicationId || null },
+        resolve
+      );
+    });
+    if (!res?.ok || !res.bytes?.length) {
+      return { ok: false, error: res?.error || "No resume file from API" };
+    }
+    const u8 = new Uint8Array(res.bytes);
+    const file = new File([u8], res.filename || "resume.pdf", {
+      type: res.contentType || "application/pdf",
+    });
+    return { ok: true, file };
+  }
+
+  async function fillResumeUploads(profile) {
+    const inputs = findResumeFileInputs();
+    if (!inputs.length) {
+      return { attached: 0, attempted: 0, error: null };
+    }
+    const appId = profile?.resume?.application_id || null;
+    const fetched = await fetchResumeBlob(appId);
+    if (!fetched.ok) {
+      return { attached: 0, attempted: inputs.length, error: fetched.error };
+    }
+    let attached = 0;
+    for (const input of inputs) {
+      if (input.disabled) continue;
+      if (attachFileToInput(input, fetched.file)) attached += 1;
+    }
+    return { attached, attempted: inputs.length, error: null };
+  }
+
   function fillPage(profile, llmMappings = null) {
     const fields = [
       ...document.querySelectorAll(
@@ -325,11 +406,26 @@ if (!window.__CAREER_OS_AUTOFILL_LOADED) {
       }
     }
 
+    showToast("Attaching resume file…");
+    const resumeUp = await fillResumeUploads(profile);
+    if (resumeUp.attached > 0) {
+      stats.filled += resumeUp.attached;
+      stats.confidence = Math.min(0.99, stats.confidence + 0.05);
+    }
+
     await reportEvent({
       event_type: "filled",
       host,
       url,
       confidence: stats.confidence,
+      detail:
+        resumeUp.attached > 0
+          ? `resume_attached:${resumeUp.attached}`
+          : resumeUp.error
+            ? `resume_skip:${resumeUp.error}`
+            : resumeUp.attempted
+              ? "resume_attach_failed"
+              : "no_file_input",
     });
 
     const mode = profile.mode || "autofill_only";
@@ -351,8 +447,22 @@ if (!window.__CAREER_OS_AUTOFILL_LOADED) {
     }
 
     if (!wantAuto) {
-      showToast(`Career OS filled ${stats.filled} field(s). You click Submit.`);
-      return { ok: true, filled: stats.filled, confidence: stats.confidence, submitted: false };
+      const resumeNote =
+        resumeUp.attached > 0
+          ? ` Resume attached (${resumeUp.attached}).`
+          : resumeUp.error
+            ? ` Resume not attached: ${resumeUp.error}`
+            : resumeUp.attempted
+              ? " Resume file input found but attach failed — upload manually."
+              : "";
+      showToast(`Career OS filled ${stats.filled} field(s).${resumeNote} You click Submit.`);
+      return {
+        ok: true,
+        filled: stats.filled,
+        confidence: stats.confidence,
+        submitted: false,
+        resumeAttached: resumeUp.attached,
+      };
     }
 
     const gate = await reportEvent({

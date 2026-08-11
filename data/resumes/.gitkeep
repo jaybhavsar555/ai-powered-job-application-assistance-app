@@ -1,0 +1,2 @@
+# Place base resumes here (PDF, DOCX, or Markdown).
+# Docker mounts this folder to /data/resumes inside the API container.

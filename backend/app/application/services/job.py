@@ -38,7 +38,7 @@ class JobService:
             raw_text = raw_desc
         elif url:
             scraped = await scrape_job_page(url)
-            raw_text = scraped.text
+            raw_text = (scraped.text or "").strip()
             scrape_source = scraped.source
             scrape_error = scraped.error
             if not title and scraped.title:
@@ -49,6 +49,17 @@ class JobService:
                 f"[JobService] scrape url={url} source={scrape_source} "
                 f"chars={len(raw_text)} error={scrape_error}"
             )
+            if len(raw_text) < 80:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Could not scrape enough job text from that URL "
+                        f"(source={scrape_source}). "
+                        f"{scrape_error or ''} "
+                        "Paste the full job description in description_raw — "
+                        "we will not invent a fake JD."
+                    ).strip(),
+                )
         else:
             raise HTTPException(
                 status_code=400,

@@ -3,10 +3,22 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { 
-  Search, MapPin, Briefcase, DollarSign, Globe, 
-  CheckCircle, Bot, Sparkles, Wand2, Code2, ArrowRight,
-  UploadCloud
+import {
+  Search,
+  MapPin,
+  Briefcase,
+  DollarSign,
+  Globe,
+  CheckCircle,
+  Bot,
+  Sparkles,
+  Wand2,
+  Code2,
+  ArrowRight,
+  UploadCloud,
+  AlertCircle,
+  X,
+  Info,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 
@@ -40,6 +52,72 @@ interface DiscoveredJob {
   ingestedJobId?: string;
 }
 
+type PageMessage = {
+  tone: "error" | "success" | "info";
+  title: string;
+  detail: string;
+};
+
+type MessageContext = "discover" | "autofill" | "upload" | "wishlist";
+
+function explainIssue(raw: string, context: MessageContext): PageMessage {
+  const msg = (raw || "").trim() || "Something went wrong";
+
+  if (/abort|timeout|Failed to fetch|network/i.test(msg)) {
+    return {
+      tone: "error",
+      title:
+        context === "discover"
+          ? "Discovery timed out"
+          : "Request timed out",
+      detail:
+        "Boards + AI scoring can take 1–2 minutes. Wait a moment and retry. If it keeps failing, confirm the API is up on :8001 and check Canvas → LLM (Token Harbor may be busy).",
+    };
+  }
+
+  if (/401|credentials|unauthorized|validate/i.test(msg)) {
+    return {
+      tone: "error",
+      title: "Session expired",
+      detail:
+        "Your login token is no longer valid (common after API restart). Sign in again, then retry.",
+    };
+  }
+
+  if (/502|503|Token Harbor|LLM unavailable|peak demand|upstream/i.test(msg)) {
+    return {
+      tone: "error",
+      title: "AI provider unavailable",
+      detail:
+        msg.length <= 320
+          ? msg
+          : "Token Harbor / LLM returned an error. Retry in a minute, or switch model in Canvas / backend/.env (e.g. deepseek-v4-flash:free).",
+    };
+  }
+
+  if (/no live jobs|returned no|no matching/i.test(msg)) {
+    return {
+      tone: "info",
+      title: "No matching jobs found",
+      detail:
+        "Vault portals and remote boards returned nothing for these preferences. Broaden the role, keep Remote on, seed portals on Vault, then run Discovery again.",
+    };
+  }
+
+  const titles: Record<MessageContext, string> = {
+    discover: "Discovery failed",
+    autofill: "Auto-Fill failed",
+    upload: "Resume upload failed",
+    wishlist: "Could not add to Wishlist",
+  };
+
+  return {
+    tone: "error",
+    title: titles[context],
+    detail: msg,
+  };
+}
+
 const LOCATION_HUBS = [
   { id: "india", label: "India Tech Hubs", desc: "BLR, BOM, PUN, HYD, DEL" },
   { id: "usa", label: "USA & Canada", desc: "SF, NY, Austin, Toronto" },
@@ -66,7 +144,7 @@ export default function DiscoveryPage() {
   const [loading, setLoading] = useState(false);
   const [autoFilling, setAutoFilling] = useState(false);
   const [recommendedJobs, setRecommendedJobs] = useState<DiscoveredJob[]>([]);
-  const [activeTab, setActiveTab] = useState<'setup' | 'results'>('setup');
+  const [activeTab, setActiveTab] = useState<"setup" | "results">("setup");
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [expandedJDs, setExpandedJDs] = useState<Record<string, boolean>>({});
   const [ingestingId, setIngestingId] = useState<string | null>(null);
@@ -75,6 +153,7 @@ export default function DiscoveryPage() {
   const [selectedResume, setSelectedResume] = useState<string>("");
   const [autofillNote, setAutofillNote] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [pageMessage, setPageMessage] = useState<PageMessage | null>(null);
   const resumeInputRef = useRef<HTMLInputElement>(null);
 
   const loadLibrary = async () => {
@@ -105,6 +184,7 @@ export default function DiscoveryPage() {
     if (!file || !token) return;
     setUploading(true);
     setAutofillNote(null);
+    setPageMessage(null);
     try {
       const form = new FormData();
       form.append("file", file);
@@ -124,8 +204,18 @@ export default function DiscoveryPage() {
       await loadLibrary();
       setSelectedResume(name);
       setAutofillNote(`Uploaded ${name} — ready for Auto-Fill.`);
+      setPageMessage({
+        tone: "success",
+        title: "Resume uploaded",
+        detail: `${name} is in your library and selected for Auto-Fill.`,
+      });
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Upload failed");
+      setPageMessage(
+        explainIssue(
+          err instanceof Error ? err.message : "Upload failed",
+          "upload"
+        )
+      );
     } finally {
       setUploading(false);
       if (resumeInputRef.current) resumeInputRef.current.value = "";
@@ -153,6 +243,7 @@ export default function DiscoveryPage() {
   const handleAutoFill = async () => {
     setAutoFilling(true);
     setAutofillNote(null);
+    setPageMessage(null);
     try {
       const res = await fetch("/api/v1/workflows/analyze-resumes", {
         method: "POST",
@@ -187,20 +278,31 @@ export default function DiscoveryPage() {
       if (Array.isArray(available_resumes) && available_resumes.length) {
         setLibraryResumes(available_resumes);
       }
-      setAutofillNote(
+      const filledNote =
         note ||
-          (used_resumes?.length
-            ? `Filled from: ${used_resumes.join(", ")}`
-            : source === "fallback_no_library"
-              ? "No library resume found — defaults applied. Upload one first."
-              : "Preferences updated")
-      );
+        (used_resumes?.length
+          ? `Filled from: ${used_resumes.join(", ")}`
+          : source === "fallback_no_library"
+            ? "No library resume found — defaults applied. Upload one first."
+            : "Preferences updated");
+      setAutofillNote(filledNote);
+      setPageMessage({
+        tone: source === "fallback_no_library" ? "info" : "success",
+        title:
+          source === "fallback_no_library"
+            ? "Using defaults"
+            : "Preferences filled from resume",
+        detail: filledNote,
+      });
     } catch (err) {
       console.error(err);
-      alert(
-        err instanceof Error
-          ? err.message
-          : "Failed to analyze resumes. Please ensure backend is running."
+      setPageMessage(
+        explainIssue(
+          err instanceof Error
+            ? err.message
+            : "Failed to analyze resumes. Ensure the backend is running on :8001.",
+          "autofill"
+        )
       );
     } finally {
       setAutoFilling(false);
@@ -210,38 +312,50 @@ export default function DiscoveryPage() {
   const handleRunDiscovery = async () => {
     setLoading(true);
     setWishlistNotice(null);
+    setPageMessage(null);
     try {
       const res = await fetch("/api/v1/workflows/discover", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(preferences)
+        body: JSON.stringify(preferences),
+        signal: AbortSignal.timeout(300_000),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         const detail =
           typeof body.detail === "string"
             ? body.detail
-            : `Discovery failed (${res.status})`;
+            : Array.isArray(body.detail)
+              ? body.detail
+                  .map((d: { msg?: string }) => d.msg)
+                  .filter(Boolean)
+                  .join("; ")
+              : `Discovery failed (HTTP ${res.status})`;
         throw new Error(detail);
       }
       const data = await res.json();
       const jobs = (data.jobs || []) as DiscoveredJob[];
       if (jobs.length === 0) {
-        throw new Error("Discovery returned no jobs");
+        throw new Error(
+          "Discovery returned no live jobs — try broader roles or check Remotive/RemoteOK."
+        );
       }
       setRecommendedJobs(jobs);
       if (jobs.length > 0) setSelectedJobId(jobs[0].id);
       setActiveTab("results");
+      setPageMessage({
+        tone: "success",
+        title: `Found ${jobs.length} matches`,
+        detail:
+          "Review scores below. Add strong fits to Wishlist, then open Jobs → Canvas / Review & Apply.",
+      });
     } catch (err) {
       console.error(err);
-      alert(
-        err instanceof Error
-          ? err.message
-          : "Discovery failed — is the API running on :8001?"
-      );
+      const msg = err instanceof Error ? err.message : String(err);
+      setPageMessage(explainIssue(msg, "discover"));
     } finally {
       setLoading(false);
     }
@@ -253,6 +367,7 @@ export default function DiscoveryPage() {
 
     setIngestingId(jobId);
     setWishlistNotice(null);
+    setPageMessage(null);
     try {
       const description = [
         job.description || job.matchReason || "",
@@ -293,6 +408,11 @@ export default function DiscoveryPage() {
       setWishlistNotice(
         `Added ${job.company} — ${job.title}. Next: open Jobs → Canvas → Package → Outreach.`
       );
+      setPageMessage({
+        tone: "success",
+        title: "Added to Wishlist",
+        detail: `${job.company} — ${job.title}. Next: Jobs → Canvas → Package → Outreach.`,
+      });
       setRecommendedJobs((prev) =>
         prev.map((j) =>
           j.id === jobId ? { ...j, wishlisted: true, ingestedJobId: data.id } : j
@@ -300,7 +420,12 @@ export default function DiscoveryPage() {
       );
     } catch (err) {
       console.error(err);
-      alert(err instanceof Error ? err.message : "Error adding to Wishlist.");
+      setPageMessage(
+        explainIssue(
+          err instanceof Error ? err.message : "Error adding to Wishlist.",
+          "wishlist"
+        )
+      );
     } finally {
       setIngestingId(null);
     }
@@ -320,7 +445,9 @@ export default function DiscoveryPage() {
               Proactive Job Discovery
             </h1>
             <p className="text-muted-foreground text-lg max-w-xl">
-              Set preferences, review AI matches, then one-click add roles to your Wishlist — tailor and apply with human approval.
+              Searches your Vault job-portal KBs (Instahyre, Wellfound, YC, WWR,
+              and the rest) first — up to ~12 hits — then fills with Remotive /
+              RemoteOK / Arbeitnow. Score, Wishlist, then Canvas / Review &amp; Apply.
             </p>
           </div>
           
@@ -355,7 +482,51 @@ export default function DiscoveryPage() {
       </div>
 
       <div className="p-4 md:p-8 max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
-        
+        {pageMessage && (
+          <div
+            role="status"
+            className={`mb-6 rounded-xl border px-4 py-3 text-sm flex items-start gap-3 ${
+              pageMessage.tone === "error"
+                ? "border-destructive/30 bg-destructive/10"
+                : pageMessage.tone === "success"
+                  ? "border-emerald-500/30 bg-emerald-500/10"
+                  : "border-amber-500/30 bg-amber-500/10"
+            }`}
+          >
+            {pageMessage.tone === "error" ? (
+              <AlertCircle className="h-5 w-5 mt-0.5 shrink-0 text-destructive" />
+            ) : pageMessage.tone === "success" ? (
+              <CheckCircle className="h-5 w-5 mt-0.5 shrink-0 text-emerald-500" />
+            ) : (
+              <Info className="h-5 w-5 mt-0.5 shrink-0 text-amber-500" />
+            )}
+            <div className="min-w-0 flex-1 space-y-1">
+              <p
+                className={`font-semibold ${
+                  pageMessage.tone === "error"
+                    ? "text-destructive"
+                    : pageMessage.tone === "success"
+                      ? "text-emerald-700 dark:text-emerald-400"
+                      : "text-amber-700 dark:text-amber-400"
+                }`}
+              >
+                {pageMessage.title}
+              </p>
+              <p className="text-muted-foreground leading-relaxed">
+                {pageMessage.detail}
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-label="Dismiss message"
+              onClick={() => setPageMessage(null)}
+              className="text-muted-foreground hover:text-foreground shrink-0 p-1"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
         {/* SETUP TAB */}
         {activeTab === 'setup' && (
           <div className="space-y-8">

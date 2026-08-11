@@ -122,10 +122,14 @@ def extract_text(path: Path) -> str:
                 return ""
 
     if suffix == ".docx":
-        from docx import Document
+        try:
+            from docx import Document
 
-        doc = Document(str(path))
-        return "\n".join(p.text for p in doc.paragraphs if p.text).strip()
+            doc = Document(str(path))
+            return "\n".join(p.text for p in doc.paragraphs if p.text).strip()
+        except Exception as e:
+            logger.warning(f"Failed to extract DOCX {path.name}: {e}")
+            return ""
     return path.read_text(encoding="utf-8", errors="ignore").strip()
 
 
@@ -135,7 +139,7 @@ def parse_contact(resume_text: str) -> tuple[str, str]:
     name = lines[0] if lines else "Candidate"
     # Avoid treating a title line as name
     if len(name) > 60 or "|" in name:
-        name = "Jay Padmakar Bhavsar"
+        name = "Candidate"
 
     email_match = re.search(r"[\w.+-]+@[\w.-]+\.\w+", resume_text)
     phone_match = re.search(r"(?:\+?\d[\d\s-]{8,}\d)", resume_text)

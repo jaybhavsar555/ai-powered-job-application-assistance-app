@@ -298,7 +298,8 @@ export default function ApplyStudioPage() {
           <h1 className="text-3xl font-bold tracking-tight">Review &amp; Apply</h1>
           <p className="text-muted-foreground mt-1">
             Guided apply: open the employer site, map your data, approve each
-            step — you click Submit.
+            step — you click Submit. Chrome extension fills forms and can attach
+            your tailored resume on Greenhouse / Lever / Workday file inputs.
           </p>
         </div>
         {error && (

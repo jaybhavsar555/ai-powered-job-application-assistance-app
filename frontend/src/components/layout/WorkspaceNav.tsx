@@ -30,6 +30,7 @@ type NavItem = { name: string; href: string; icon: typeof LayoutDashboard };
 const simplePrimary: NavItem[] = [
   { name: "Inbox", href: "/inbox", icon: LayoutDashboard },
   { name: "Jobs", href: "/jobs", icon: Store },
+  { name: "Quick Apply", href: "/quick-apply", icon: Send },
   { name: "Apply", href: "/apply", icon: Sparkles },
   { name: "Resumes", href: "/resumes", icon: FileText },
   { name: "Tracker", href: "/tracker", icon: Network },

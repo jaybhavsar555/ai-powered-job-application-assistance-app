@@ -1,37 +1,44 @@
 # Career OS — User Guide
 
-How to use every workspace feature with real jobs (not the Canvas demo UUID).  
-UI: **http://localhost:3000** · API: **http://localhost:8001**
+How to use every workspace feature with **real Tracker jobs**.  
+UI: **http://localhost:3000** (or **3001**) · API: **http://localhost:8001**
+
+Cross-OS install (Docker backend + local frontend): see root [README.md](../README.md) and [docker_backend.md](docker_backend.md).
 
 ---
 
 ## Before you start
 
-1. Infra: `docker compose up -d` (Postgres, Redis, Qdrant, Ollama)
-2. Backend: `uvicorn app.main:app --reload --host 127.0.0.1 --port 8001` from `backend/`
-3. Frontend: `npm run dev` from `frontend/`
-4. Open **http://localhost:3000/login** and sign in
+1. **Backend (always Docker):** from repo root → `docker compose up -d`  
+   (Postgres, Redis, Qdrant, Ollama, API — Python deps are inside the image)
+2. Pull a model once: `docker compose exec ollama ollama pull qwen2.5:3b`
+3. **Frontend (host):** `cd frontend` → `npm install` → `npm run dev`
+4. Open **/login** and **Register** your own account (recommended), or use a seed user:
 
 | Account | Email | Password | Notes |
 |---------|-------|----------|-------|
-| You (admin) | `jay.bhavsar.dev@gmail.com` | `Admin123!` | Preferred for full testing |
-| Demo | `demo@example.com` | `Demo1234!` | Marketplace toggle allowed |
+| Your account | *(register)* | *(your password)* | Best for real job hunting |
+| Demo | `demo@example.com` | `Demo1234!` | Seeded when `SEED_DEV_USERS=true` |
 | Admin | `admin@example.com` | `Admin123!` | Seeded admin |
-| User | `user@example.com` | `User1234!` | Standard role |
+| User | `user@example.com` | `User1234!` | Seeded standard role |
 
-**Continue as demo** also works, but each browser/session has its own JWT — jobs you import belong to that user.
+Each JWT owns its own jobs — do not share one account across people.
+
+Canvas **demo/mock jobs** and **Mock LLM** are disabled so missing models/scrapes fail visibly.
 
 ---
 
 ## The real apply loop (recommended)
 
 ```text
-Vault (portals) → Tracker (import real JD) → Canvas (pick that job + Simulate)
-    → Approvals (accept resume + cover) → Package (DOCX/PDF on disk)
+Discovery (Remotive/RemoteOK/Arbeitnow + Vault portals, ≤15) or Jobs import
+    → Canvas (real job + Ollama) → Approvals → Package
+    → Review & Apply / extension (resume file attach) 
+    → Quick Apply for LinkedIn posts with email (Download PDF & open Gmail)
+    → Outreach (paste contact if empty) → Inbox day-3/7 follow-up
 ```
 
-Do **not** rely on the Canvas placeholder job id `00000000-…` for packaging or approvals. Always pick a **Tracker card**.
-
+Always pick a **real Tracker / Jobs** row — never invent a placeholder job id.
 ---
 
 ## 1. Login (`/login`)
@@ -231,16 +238,16 @@ OLLAMA tip: use `qwen2.5:3b` on a 4GB GPU (GTX 1650 Ti). Docker Compose enables 
 2. Use semantic search before calls  
 3. Keep Tracker stage at **Interview**  
 
-### D. Demo for a friend (no API keys)
+### D. Demo for a friend (no OpenAI key)
 
-1. Continue as demo  
-2. Canvas → **Mock** → Simulate  
-3. Show Tracker/Approvals UI without waiting on LLM  
+1. Register or use `demo@example.com` / `Demo1234!`  
+2. Ensure Ollama model is pulled (`qwen2.5:3b`) — Mock LLM is off  
+3. Import a sample JD (paste text) → Canvas Simulate → Approvals  
 
 ### E. Durable run across API restart
 
 1. Import real job → Canvas Simulate  
-2. Restart uvicorn mid-pipeline (optional stress test)  
+2. `docker compose restart api` mid-pipeline (optional stress test)  
 3. Resume with same `job_id` — Postgres checkpointer restores thread  
 
 ---
@@ -249,10 +256,10 @@ OLLAMA tip: use `qwen2.5:3b` on a 4GB GPU (GTX 1650 Ti). Docker Compose enables 
 
 | Thing | Real? | Notes |
 |-------|-------|-------|
-| Tracker card from Import | **Yes** | Stored in Postgres for your user |
-| Canvas job `00000000-…` | No | Placeholder when no job selected |
-| LLM **Mock** provider | No | Deterministic agent text |
-| Scrape fallback text | Partial | Card exists; paste JD for full fidelity |
+| Tracker / Jobs card from Import | **Yes** | Stored in Postgres for your user |
+| Canvas demo job UUID | **Disabled** | Select a real job only |
+| LLM **Mock** provider | **Disabled** by default | Use Ollama or OpenAI |
+| Failed scrape | Empty + error | Paste JD — nothing invented |
 | Approvals + Package | **Yes** | Needs a real application / job_id |
 
 ---

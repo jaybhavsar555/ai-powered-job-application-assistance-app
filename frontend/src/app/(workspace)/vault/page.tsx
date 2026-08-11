@@ -196,8 +196,10 @@ export default function VaultPage() {
         <p className="font-medium">How to use portals</p>
         <p className="text-muted-foreground">
           Open a portal → search → copy the job posting URL → Import on Jobs.
-          Per-site scrapers are not supported (boards block bots). Discovery still
-          pulls Remotive matches separately.
+          Per-site scrapers are not supported (boards block bots). Discovery
+          searches these Vault portal sites first (DuckDuckGo site: filter), then
+          fills with Remotive / RemoteOK / Arbeitnow for up to 15 scored matches.
+          Seed portals here so Discovery and manual Import stay aligned.
         </p>
         <div className="flex flex-wrap gap-2 pt-1">
           <Link

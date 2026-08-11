@@ -84,7 +84,8 @@ docker compose exec ollama ollama pull qwen2.5:3b
 docker compose exec ollama ollama pull nomic-embed-text
 # Optional stronger chat model:
 # docker compose exec ollama ollama pull qwen2.5:7b
-# then set LLM_MODEL=qwen2.5:7b in backend/.env and restart uvicorn
+# then set OLLAMA_MODEL=qwen2.5:7b (Compose env) and recreate api:
+# docker compose up -d api
 ```
 
 ## Phase history (Career OS numbering)
@@ -100,47 +101,46 @@ docker compose exec ollama ollama pull nomic-embed-text
 | 8 | Tracker Kanban + Analytics + Qdrant long-term memory |
 | 9 | Approval Accept/Reject → DB + Ready stage; demo auth; SSE `?token=` |
 | 10 | Playwright job URL scrape + Tracker **Import job** |
-| 11 | `company_research_agent` (site/SERP/mock → cover-letter hooks) |
+| 11 | `company_research_agent` (site/SERP → cover-letter hooks; empty on failure) |
 
 ### Still deferred (not numbered)
 
-- Full email/auth product login  
-- LangGraph checkpoints per application  
-- Agent Marketplace  
-- Production deploy / secrets  
+- Full OAuth / SSO product login  
+- Recruiter email discovery (Hunter/SERP) — currently unavailable by design  
+- Billing / Stripe  
+- Production deploy polish  
 
 ## Troubleshooting
 
 ### `model 'qwen2.5:7b' not found` (or any model 404)
 
-1. Confirm what the API is configured to use: `LLM_MODEL` in `backend/.env` (default **`qwen2.5:3b`**).  
+1. Confirm Compose / Canvas model (default **`qwen2.5:3b`**).  
 2. List local models: `docker compose exec ollama ollama list`  
 3. Pull the configured model: `docker compose exec ollama ollama pull qwen2.5:3b`  
-4. **Restart uvicorn** after changing `.env` (`get_settings` is cached).  
-5. If the model is still missing, agents should fall back to mocks — if you still see a hard `AGENT_ERROR`, the API process is stale; restart it.
+4. Recreate API after env changes: `docker compose up -d api`  
+5. Mock LLM is **disabled** — missing models raise `AGENT_ERROR` instead of fake success. That is intentional.
 
 ### SSE connection failed
 
-- API must be on **:8001** (`NEXT_PUBLIC_API_URL=http://localhost:8001/api/v1`).  
+- API must be on **:8001** via Docker (`NEXT_PUBLIC_API_URL=/api/v1` → Next rewrite).  
 - Redis should be up (`docker compose up -d`); bus also has an in-process fallback.  
-- Demo JWT must exist (wait for auth bootstrap, then Simulate again).
+- Sign in at `/login` so the JWT exists, then Simulate again.
 
 ## How to verify quickly
 
 ```bash
-docker compose up -d
+# Backend always in Docker (includes API + deps)
+docker compose up -d --build
 docker compose exec ollama ollama pull qwen2.5:3b
 docker compose exec ollama ollama pull nomic-embed-text
 
-cd backend
-# optional for richer scrapes:
-# playwright install chromium
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
-
-cd frontend && npm run dev
+# Frontend on the host
+cd frontend && npm install && npm run dev
 ```
 
-1. Open `/tracker` → Import job (URL or paste) → Wishlist card appears.  
-2. Open `/canvas` → Simulate → Terminal shows all five agents → Approvals.  
+See root [README.md](../README.md) for Windows / macOS / Linux install links.
+
+1. Open `/jobs` → Import job (URL or paste) → Wishlist card appears.  
+2. Open `/canvas` → pick that job → Ollama → Simulate → Approvals.  
 3. Open `/vault` → add entity → Semantic Search (needs `nomic-embed-text`).  
 4. Open `/analytics` → see runs / success rates.

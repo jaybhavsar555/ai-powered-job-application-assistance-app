@@ -10,10 +10,13 @@ venv/
 .env.*
 !.env.example
 !.env.production.example
+!.env.dist.example
 backend/.env
 frontend/.env
 frontend/.env.local
 frontend/.env.*.local
+.env.dist
+.env.production
 
 # Build / cache
 frontend/.next/
@@ -41,3 +44,8 @@ Thumbs.db
 *.log
 *.sqlite3
 .cursor/
+data/resumes/*
+!data/resumes/.gitkeep
+data/packages/*
+!data/packages/.gitkeep
+

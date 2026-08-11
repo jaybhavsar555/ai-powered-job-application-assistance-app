@@ -18,6 +18,7 @@ export default function InterviewPrepPage() {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [activeTab, setActiveTab] = useState<"dossier" | "simulator">("dossier");
+  const [error, setError] = useState<string | null>(null);
   
   // Chat state
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
@@ -56,11 +57,14 @@ export default function InterviewPrepPage() {
   async function handleGenerate() {
     try {
       setGenerating(true);
+      setError(null);
       const res = await api.post(`/applications/${id}/interview-prep`);
       setPrep(res.data.interview_prep);
     } catch (e) {
       console.error(e);
-      alert("Failed to generate prep guide.");
+      setError(
+        "Could not generate the prep guide (AI may be busy). Retry in a moment, or switch LLM in Canvas."
+      );
     } finally {
       setGenerating(false);
     }
@@ -112,6 +116,9 @@ export default function InterviewPrepPage() {
           {generating ? <Loader2 className="h-5 w-5 animate-spin" /> : <Zap className="h-5 w-5" />}
           {generating ? "Generating Your Guide..." : "Generate Prep Guide"}
         </button>
+        {error && (
+          <p className="mt-4 text-sm text-destructive max-w-md mx-auto">{error}</p>
+        )}
       </div>
     );
   }

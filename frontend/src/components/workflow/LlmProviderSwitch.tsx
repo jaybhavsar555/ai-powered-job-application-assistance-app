@@ -1,17 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Cpu, Cloud, Zap, Loader2 } from "lucide-react";
+import { Cpu, Cloud, Loader2, Ship } from "lucide-react";
 import api, { getApiErrorMessage } from "@/lib/api";
 
-type Provider = "openai" | "ollama" | "mock";
+type Provider = "openai" | "tokenharbor" | "ollama" | "mock";
 
 type LlmStatus = {
   provider: Provider;
   model: string;
   force_mock: boolean;
+  mock_allowed?: boolean;
   openai_configured: boolean;
+  tokenharbor_configured?: boolean;
   openai_model_default: string;
+  tokenharbor_model_default?: string;
   ollama_model_default: string;
   ollama_base_url: string;
   message?: string;
@@ -23,9 +26,14 @@ const OPTIONS: {
   icon: typeof Cloud;
   hint: string;
 }[] = [
-  { id: "openai", label: "OpenAI", icon: Cloud, hint: "Cloud — fast" },
-  { id: "ollama", label: "Ollama", icon: Cpu, hint: "Local — warms model on switch" },
-  { id: "mock", label: "Mock", icon: Zap, hint: "Instant demo" },
+  {
+    id: "tokenharbor",
+    label: "Token Harbor",
+    icon: Ship,
+    hint: "Gateway credits — Claude/GPT/DeepSeek via one key",
+  },
+  { id: "openai", label: "OpenAI", icon: Cloud, hint: "Direct OpenAI — needs billing" },
+  { id: "ollama", label: "Ollama", icon: Cpu, hint: "Local GPU/CPU — free, slower" },
 ];
 
 export function LlmProviderSwitch() {
@@ -51,6 +59,16 @@ export function LlmProviderSwitch() {
     if (busy || status?.provider === provider) return;
     if (provider === "openai" && status && !status.openai_configured) {
       setError("Set OPENAI_API_KEY in backend/.env first");
+      return;
+    }
+    if (provider === "tokenharbor" && status && !status.tokenharbor_configured) {
+      setError("Set TOKENHARBOR_API_KEY in backend/.env first");
+      return;
+    }
+    if (provider === "mock") {
+      setError(
+        "Mock LLM is disabled — fake agent output hides real failures. Use Token Harbor, Ollama, or OpenAI."
+      );
       return;
     }
     setBusy(true);
@@ -93,7 +111,7 @@ export function LlmProviderSwitch() {
           );
         })}
       </div>
-      <p className="text-[10px] text-muted-foreground truncate max-w-[280px]">
+      <p className="text-[10px] text-muted-foreground truncate max-w-[320px]">
         {error ? (
           <span className="text-red-400">{error}</span>
         ) : status ? (

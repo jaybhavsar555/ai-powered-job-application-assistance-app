@@ -115,6 +115,7 @@ def _list_new_jobs_48h(apps: list[DBApplication]) -> list[dict[str, Any]]:
                 "stage": stage,
                 "url": job.url if job else None,
                 "age_hours": age_h,
+                "ats_score": (app.workflow_state or {}).get("ats_score"),
                 "label": f"New job < 48h — apply now · {company}",
                 "href": f"/apply?job_id={job_id}",
                 "created_at": created.isoformat() if created else None,
@@ -161,7 +162,7 @@ def _pick_next_action(
             "company": nj["company"],
             "role_title": nj.get("role_title"),
             "stage": nj.get("stage"),
-            "ats_score": None,
+            "ats_score": nj.get("ats_score"),
             "estimated_minutes": 10,
         }
 

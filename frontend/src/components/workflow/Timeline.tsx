@@ -33,6 +33,7 @@ function buildSteps(
     const prev = byNode.get(id);
     const status = eventToStepStatus(evt);
     const detailParts: string[] = [];
+    if (evt.error) detailParts.push(String(evt.error));
     if (evt.message) detailParts.push(String(evt.message));
     if (typeof evt.latency_ms === "number") {
       detailParts.push(`${Math.round(evt.latency_ms)}ms`);
@@ -163,6 +164,15 @@ export function Timeline() {
             : undefined
         }
       />
+
+      {status === "error" && (
+        <p className="text-sm text-red-400 px-1">
+          {events.find((e) => e.error)?.error ||
+            events.find((e) => e.type === "ERROR" || e.type === "AGENT_ERROR")
+              ?.message ||
+            "Workflow failed. Fix LLM (prefer Ollama), scrape, or missing job data — nothing was faked."}
+        </p>
+      )}
 
       {events.length === 0 && status === "idle" && (
         <p className="text-sm text-muted-foreground px-1">

@@ -18,6 +18,7 @@ from app.infrastructure.llm.client import structured_generate
 logger = logging.getLogger(__name__)
 
 FOLLOW_UP_DAYS = 3
+FOLLOW_UP_OFFSETS = (3, 7)  # day-3 + day-7 cadence (HITL send from Outreach)
 
 
 class FollowUpDraft(BaseModel):
@@ -36,6 +37,36 @@ def _company_name(job: Optional[DBJob]) -> str:
         return job.company.name
     normalized = job.description_normalized or {}
     return str(normalized.get("company_name") or "the company")
+
+
+def _candidate_first_name(user_email: Optional[str] = None) -> str:
+    """Sign-off from resume library contact line, else email local-part — never hardcode."""
+    try:
+        from pathlib import Path
+
+        from app.core.config import get_settings
+        from app.infrastructure.resume_library import (
+            detect_role_family,
+            extract_text,
+            parse_contact,
+            pick_base_resume,
+        )
+
+        settings = get_settings()
+        source = Path(settings.RESUME_SOURCE_DIR) if settings.RESUME_SOURCE_DIR else None
+        if source and source.exists():
+            base = pick_base_resume(source, detect_role_family("", ""))
+            if base:
+                name, _ = parse_contact(extract_text(base.path))
+                if name and name.strip() and name.strip().lower() != "candidate":
+                    return name.strip().split()[0]
+    except Exception:
+        pass
+    local = (user_email or "").split("@")[0].replace(".", " ").replace("_", " ").strip()
+    bits = [b for b in local.split() if b and b.lower() not in {"dev", "mail"}]
+    if bits:
+        return bits[0].capitalize()
+    return "there"
 
 
 def _fallback_follow_up(
@@ -65,10 +96,12 @@ async def _draft_follow_up_copy(
     role: str,
     recruiter_name: Optional[str],
     jd_snippet: str,
+    candidate_first: str,
 ) -> FollowUpDraft:
     """Human, readable follow-up — LLM when available, template otherwise."""
+    first = candidate_first or "there"
     fallback = lambda: _fallback_follow_up(
-        candidate_first="Jay",
+        candidate_first=first,
         company=company,
         role=role,
         recruiter_name=recruiter_name,
@@ -80,30 +113,27 @@ async def _draft_follow_up_copy(
         "- Under 120 words\n"
         "- No emojis, no 'I hope this email finds you well' clichés\n"
         "- Match professional-but-human tone for tech hiring\n"
-        "- Mention the role and company once; one soft CTA\n\n"
+        "- Mention the role and company once; one soft CTA\n"
+        f"- Sign off with first name only: {first}\n\n"
         f"Company: {company}\n"
         f"Role: {role}\n"
         f"Recruiter/hiring contact: {recruiter_name or 'Hiring Team'}\n"
         f"JD snippet: {(jd_snippet or 'n/a')[:800]}"
     )
-    try:
-        return await structured_generate(
-            FollowUpDraft,
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "You write human follow-up emails for job seekers. "
-                        "Output structured fields only."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            fallback=fallback,
-        )
-    except Exception as exc:
-        logger.info(f"Follow-up LLM draft fallback: {exc}")
-        return fallback()
+    return await structured_generate(
+        FollowUpDraft,
+        [
+            {
+                "role": "system",
+                "content": (
+                    "You write human follow-up emails for job seekers. "
+                    "Output structured fields only."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        fallback=fallback,
+    )
 
 
 async def schedule_follow_up_on_applied(
@@ -113,20 +143,24 @@ async def schedule_follow_up_on_applied(
     days: int = FOLLOW_UP_DAYS,
 ) -> dict[str, Any]:
     """
-    When user marks Applied: schedule follow-up due date and create a Draft FollowUp message.
-    Does NOT send email — user reviews in Outreach (Optim Hire Review & Apply style).
+    When user marks Applied: schedule day-3 + day-7 follow-up drafts.
+    Does NOT send email — user reviews in Outreach.
     """
     state = dict(app.workflow_state or {})
-    if state.get("follow_up_message_id"):
+    if state.get("follow_up_message_id") or state.get("follow_ups"):
         return {
             "scheduled": False,
             "reason": "follow_up_already_scheduled",
             "follow_up_due_at": state.get("follow_up_due_at"),
             "follow_up_message_id": state.get("follow_up_message_id"),
+            "follow_ups": state.get("follow_ups"),
         }
 
     now = _utc_now()
-    due = now + timedelta(days=days)
+    offsets = tuple(FOLLOW_UP_OFFSETS)
+    if days not in offsets:
+        # Preserve explicit single-day override from callers
+        offsets = (days,)
 
     result = await db.execute(
         select(DBApplication)
@@ -157,45 +191,115 @@ async def schedule_follow_up_on_applied(
         if rec:
             recruiter_name = rec.name
 
-    draft = await _draft_follow_up_copy(
-        company=company,
-        role=role,
-        recruiter_name=recruiter_name,
-        jd_snippet=jd,
-    )
-    content = f"Subject: {draft.subject_line}\n\n{draft.body}"
+    candidate_first = _candidate_first_name()
 
-    message = DBMessage(
-        application_id=app.id,
-        recruiter_id=recruiter_id,
-        content=content,
-        message_type="FollowUp",
-        status="Draft",
-    )
-    db.add(message)
-    await db.flush()
+    follow_ups: list[dict[str, Any]] = []
+    first_message_id: Optional[str] = None
+    first_due: Optional[str] = None
+
+    for offset in offsets:
+        try:
+            draft = await _draft_follow_up_copy(
+                company=company,
+                role=role,
+                recruiter_name=recruiter_name,
+                jd_snippet=jd,
+                candidate_first=candidate_first,
+            )
+            from_llm = True
+        except RuntimeError as exc:
+            print(f"[follow_up] LLM unavailable — labeled template used ({exc})")
+            draft = _fallback_follow_up(
+                candidate_first=candidate_first,
+                company=company,
+                role=role,
+                recruiter_name=recruiter_name,
+            )
+            from_llm = False
+
+        # Slightly different subject for day-7 so drafts are distinguishable
+        subject = draft.subject_line
+        if offset >= 7 and "follow" in subject.lower():
+            subject = f"Checking in — {role} at {company}"
+
+        content = f"Subject: {subject}\n\n{draft.body}"
+        if not from_llm:
+            content = (
+                "[TEMPLATE — LLM unavailable; edit before sending]\n\n" + content
+            )
+        content = f"[Follow-up day {offset}]\n{content}"
+
+        message = DBMessage(
+            application_id=app.id,
+            recruiter_id=recruiter_id,
+            content=content,
+            message_type="FollowUp",
+            status="Draft",
+        )
+        db.add(message)
+        await db.flush()
+
+        due = now + timedelta(days=offset)
+        entry = {
+            "days": offset,
+            "due_at": due.isoformat(),
+            "message_id": str(message.id),
+            "sent": False,
+        }
+        follow_ups.append(entry)
+        if first_message_id is None:
+            first_message_id = str(message.id)
+            first_due = due.isoformat()
 
     state["applied_at"] = now.isoformat()
-    state["follow_up_due_at"] = due.isoformat()
-    state["follow_up_message_id"] = str(message.id)
-    state["follow_up_days"] = days
+    state["follow_up_due_at"] = first_due
+    state["follow_up_message_id"] = first_message_id
+    state["follow_up_days"] = offsets[0] if offsets else days
+    state["follow_ups"] = follow_ups
     app.workflow_state = state
     await db.commit()
 
     return {
         "scheduled": True,
-        "follow_up_due_at": due.isoformat(),
-        "follow_up_message_id": str(message.id),
+        "follow_up_due_at": first_due,
+        "follow_up_message_id": first_message_id,
+        "follow_ups": follow_ups,
         "message_type": "FollowUp",
         "status": "Draft",
-        "note": "Follow-up draft ready — send from Outreach after the due date (no auto-send).",
+        "note": (
+            "Day-3 and day-7 follow-up drafts ready — send from Outreach after each due date "
+            "(no auto-send)."
+        ),
     }
 
 
 def follow_up_is_due(app: DBApplication, now: Optional[datetime] = None) -> bool:
     state = app.workflow_state or {}
+    if app.stage != "Applied":
+        return False
+    now = now or _utc_now()
+
+    follow_ups = state.get("follow_ups")
+    if isinstance(follow_ups, list) and follow_ups:
+        for entry in follow_ups:
+            if not isinstance(entry, dict) or entry.get("sent"):
+                continue
+            due_raw = entry.get("due_at")
+            if not due_raw:
+                continue
+            try:
+                due = datetime.fromisoformat(str(due_raw).replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if due.tzinfo is None:
+                due = due.replace(tzinfo=timezone.utc)
+            if now >= due:
+                return True
+        return False
+
+    # Legacy single follow-up
     due_raw = state.get("follow_up_due_at")
-    if not due_raw or app.stage != "Applied":
+    if not due_raw:
         return False
     if state.get("follow_up_sent"):
         return False
@@ -203,7 +307,6 @@ def follow_up_is_due(app: DBApplication, now: Optional[datetime] = None) -> bool
         due = datetime.fromisoformat(str(due_raw).replace("Z", "+00:00"))
     except ValueError:
         return False
-    now = now or _utc_now()
     if due.tzinfo is None:
         due = due.replace(tzinfo=timezone.utc)
     return now >= due
@@ -228,14 +331,37 @@ async def list_follow_ups_due(
             continue
         job = app.job
         state = app.workflow_state or {}
+        follow_ups = state.get("follow_ups")
+        due_at = state.get("follow_up_due_at")
+        message_id = state.get("follow_up_message_id")
+        label_days = state.get("follow_up_days") or FOLLOW_UP_DAYS
+        if isinstance(follow_ups, list):
+            for entry in follow_ups:
+                if not isinstance(entry, dict) or entry.get("sent"):
+                    continue
+                due_raw = entry.get("due_at")
+                if not due_raw:
+                    continue
+                try:
+                    due = datetime.fromisoformat(str(due_raw).replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if due.tzinfo is None:
+                    due = due.replace(tzinfo=timezone.utc)
+                if now >= due:
+                    due_at = due_raw
+                    message_id = entry.get("message_id")
+                    label_days = entry.get("days") or label_days
+                    break
         out.append(
             {
                 "application_id": str(app.id),
                 "job_id": str(app.job_id),
                 "company": _company_name(job),
                 "role_title": job.role_title if job else None,
-                "follow_up_due_at": state.get("follow_up_due_at"),
-                "follow_up_message_id": state.get("follow_up_message_id"),
+                "follow_up_due_at": due_at,
+                "follow_up_message_id": message_id,
+                "follow_up_days": label_days,
                 "href": "/outreach",
             }
         )

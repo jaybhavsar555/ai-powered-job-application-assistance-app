@@ -117,7 +117,28 @@ def _candidate_name(state: dict, resume: dict) -> str:
     contact = resume.get("contact") if isinstance(resume.get("contact"), dict) else {}
     if contact.get("name") and str(contact["name"]).lower() != "candidate":
         return str(contact["name"]).strip()
-    return "Jay Padmakar Bhavsar"
+    try:
+        from pathlib import Path
+
+        from app.core.config import get_settings
+        from app.infrastructure.resume_library import (
+            detect_role_family,
+            extract_text,
+            parse_contact,
+            pick_base_resume,
+        )
+
+        settings = get_settings()
+        source = Path(settings.RESUME_SOURCE_DIR) if settings.RESUME_SOURCE_DIR else None
+        if source and source.exists():
+            base = pick_base_resume(source, detect_role_family("", ""))
+            if base:
+                name, _ = parse_contact(extract_text(base.path))
+                if name and name.strip().lower() != "candidate":
+                    return name.strip()
+    except Exception:
+        pass
+    return "Candidate"
 
 
 def _role_title(state: dict, job: dict) -> str:
@@ -288,7 +309,8 @@ class OutreachDraftAgent(OSAgent):
         subj = str(payload.get("subject_line") or "").strip()
         body = str(payload.get("body") or "").strip()
 
-        # Guardrails against old robotic templates / wrong titles
+        # Guardrails: if LLM drifts into robotic templates, rewrite from context
+        # (deterministic template — not pretending to be a second LLM call)
         robotic = (
             "based on the job description, here is how",
             "wading through a generic",
@@ -297,7 +319,12 @@ class OutreachDraftAgent(OSAgent):
             "tailored application",
         )
         if any(r in body.lower() for r in robotic) or body.count("\n- ") >= 2:
+            print(
+                "[outreach] LLM draft looked robotic — rewriting from JD/resume "
+                "context (template, marked in payload)"
+            )
             payload = self._mock(state).model_dump()
+            payload["_rewritten_from_template"] = True
             subj = payload["subject_line"]
             body = payload["body"]
 

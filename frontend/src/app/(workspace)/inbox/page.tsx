@@ -157,6 +157,7 @@ export default function InboxPage() {
   const [digest, setDigest] = useState<DigestData | null>(null);
   const [loading, setLoading] = useState(true);
   const [modeBusy, setModeBusy] = useState(false);
+  const [modeError, setModeError] = useState<string | null>(null);
   const token = useAuthStore((s) => s.token);
 
   const refresh = async () => {
@@ -187,6 +188,7 @@ export default function InboxPage() {
 
   const setApplyMode = async (mode: "review_and_apply" | "auto_apply") => {
     setModeBusy(true);
+    setModeError(null);
     try {
       const res = await fetch("/api/v1/apply-prefs", {
         method: "PUT",
@@ -201,7 +203,9 @@ export default function InboxPage() {
       });
       if (!res.ok) {
         const b = await res.json().catch(() => ({}));
-        alert(typeof b.detail === "string" ? b.detail : "Failed to update mode");
+        setModeError(
+          typeof b.detail === "string" ? b.detail : "Failed to update apply mode"
+        );
         return;
       }
       await refresh();
@@ -225,6 +229,11 @@ export default function InboxPage() {
           {summary?.positioning?.headline ||
             "Tailored resume + cover + outreach — then autofill the form."}
         </p>
+        {modeError && (
+          <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {modeError}
+          </div>
+        )}
       </div>
 
       {/* Review vs Auto */}

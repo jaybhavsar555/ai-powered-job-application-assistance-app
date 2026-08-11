@@ -632,7 +632,10 @@ export default function ResumesPage() {
                       {item.has_package && (
                         <button
                           type="button"
-                          onClick={() => alert("Auto Apply starting! (Chrome Extension API pending)")}
+                          onClick={() => {
+                            // Extension handles auto-fill; open Apply / install guide
+                            window.location.href = "/apply";
+                          }}
                           className="inline-flex items-center gap-1 rounded-md bg-emerald-600 text-white px-2.5 py-1.5 text-xs font-medium hover:bg-emerald-700 ml-2"
                         >
                           <Sparkles className="h-3.5 w-3.5" /> Apply Now

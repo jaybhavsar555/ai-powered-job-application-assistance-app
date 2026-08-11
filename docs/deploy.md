@@ -33,8 +33,12 @@ Do **not** commit `.env.production`.
 
 | File | Use |
 |------|-----|
-| `docker-compose.yml` | Dev infra only (db/redis/qdrant/ollama); run API/UI on host |
-| `docker-compose.prod.yml` | Full stack including `api` + `web` images |
+| `docker-compose.yml` | **Dev:** db/redis/qdrant/ollama/**api** in Docker; Next.js on host (`npm run dev`) |
+| `docker-compose.dist.yml` | **Distribute:** full stack (api+web+infra) on the end-user machine — [distribution.md](distribution.md) |
+| `docker-compose.gpu.yml` | Optional overlay: NVIDIA GPU for Ollama (dev) |
+| `docker-compose.prod.yml` | Hardened prod / VPS |
+
+Local contributor setup: root [README.md](../README.md). Self-host handoff: [distribution.md](distribution.md).
 
 ## Auth
 

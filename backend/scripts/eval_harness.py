@@ -6,8 +6,8 @@ Usage (Docker):
   docker compose exec api python scripts/eval_harness.py --provider ollama
   docker compose exec api python scripts/eval_harness.py --provider openai
 
-Defaults to Ollama when reachable (Docker service), because OpenAI cloud often
-fails here with billing/connection errors and silently falls back to mock.
+Defaults to Ollama when reachable (Docker service). Never uses mock scores —
+LLM failures raise so you know credits/models are missing.
 """
 from __future__ import annotations
 
@@ -79,17 +79,30 @@ async def configure_provider(choice: Optional[str]) -> ProviderName:
     ollama_base = status.get("ollama_base_url") or "http://ollama:11434/v1"
     ready, models = await _ollama_ready(ollama_base)
 
-    if choice in ("openai", "ollama", "mock"):
+    if choice == "mock":
+        raise SystemExit(
+            "Refusing --provider mock. Eval must use real Ollama or OpenAI "
+            "so scores are not silently invented."
+        )
+    if choice in ("openai", "ollama"):
         provider: ProviderName = choice  # type: ignore[assignment]
     elif ready:
         provider = "ollama"
     elif status.get("openai_configured"):
         provider = "openai"
     else:
-        provider = "mock"
+        raise SystemExit(
+            "No LLM available for eval. Start Ollama (docker compose) or set "
+            "OPENAI_API_KEY with credits. Mock eval is disabled."
+        )
 
     model = None
     if provider == "ollama":
+        if not ready:
+            raise SystemExit(
+                f"Ollama not reachable at {ollama_base}. "
+                "Run: docker compose up -d ollama"
+            )
         model = await _pick_ollama_model(models)
         cfg = set_llm_provider("ollama", model=model)
         warm = await warm_ollama_model(cfg)
@@ -138,14 +151,6 @@ class EvalHarness:
             """
         ).strip()
 
-        def fallback() -> EvalScore:
-            return EvalScore(
-                factual_consistency=7,
-                relevance=7,
-                formatting=8,
-                explanation="Mock evaluator (LLM unavailable) — heuristic mid scores.",
-            )
-
         return await structured_generate(
             EvalScore,
             [
@@ -155,7 +160,6 @@ class EvalHarness:
                 },
                 {"role": "user", "content": prompt},
             ],
-            fallback=fallback,
             max_tokens=600,
         )
 
@@ -210,37 +214,40 @@ class EvalHarness:
             print(f"-> Explanation: {score.explanation}")
 
             if "Mock evaluator" in (score.explanation or ""):
-                print("WARNING: Still on mock scores — LLM did not respond.")
-            elif score.factual_consistency < 8:
+                raise SystemExit(
+                    "Eval used MOCK scores — LLM did not respond. "
+                    "Fix provider (ollama/openai) and re-run. Refusing silent success."
+                )
+            if score.factual_consistency < 8:
                 print(f"WARNING: Possible hallucination detected in {tc['name']}!")
                 has_hallucination = True
-                
+
             results.append({
                 "test_case": tc["name"],
                 "scores": {
                     "factual_consistency": score.factual_consistency,
                     "relevance": score.relevance,
-                    "formatting": score.formatting
+                    "formatting": score.formatting,
                 },
-                "explanation": score.explanation
+                "explanation": score.explanation,
             })
 
         avg_consistency = sum(r["scores"]["factual_consistency"] for r in results) / len(results)
-        
+
         report = {
             "timestamp": asyncio.get_event_loop().time(),
             "provider": cfg.provider,
             "model": cfg.model,
             "average_consistency": avg_consistency,
             "passed": not has_hallucination,
-            "details": results
+            "details": results,
         }
-        
+
         report_path = Path("eval_report.json")
         report_path.write_text(json.dumps(report, indent=2))
-        print(f"\n=== Evaluation Complete ===")
+        print("\n=== Evaluation Complete ===")
         print(f"Report saved to {report_path.absolute()}")
-        
+
         if has_hallucination:
             print("FAILED: Hallucinations detected (Factual Consistency < 8).")
             sys.exit(1)
@@ -257,7 +264,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Resume tailor eval harness")
     parser.add_argument(
         "--provider",
-        choices=("openai", "ollama", "mock"),
+        choices=("openai", "ollama"),
         default=None,
         help="LLM provider (default: ollama if reachable, else openai)",
     )

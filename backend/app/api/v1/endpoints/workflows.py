@@ -108,14 +108,27 @@ async def analyze_jd_skills(
     from app.infrastructure.scraping import scrape_job_page
     from pathlib import Path
 
-    source_dir = Path(settings.RESUME_SOURCE_DIR)
+    cfg = get_settings()
+    source_dir = Path(cfg.RESUME_SOURCE_DIR)
     file_path = source_dir / request.base_resume
-    
-    resume_text = ""
-    if file_path.exists():
-        resume_text = extract_text(file_path)
 
-    job_text = request.job_description.strip()
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Resume file not found: {request.base_resume}. "
+                "Pick a resume from the Tailor dropdown (files under data/resumes)."
+            ),
+        )
+
+    resume_text = extract_text(file_path)
+    if not (resume_text or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not extract text from resume: {request.base_resume}",
+        )
+
+    job_text = (request.job_description or "").strip()
     scrape_source = None
     scrape_warning = None
 
@@ -151,13 +164,32 @@ async def analyze_jd_skills(
         )
 
     agent = SkillGapAgent()
-    gap = await agent.run(
-        {
-            "resume_json": resume_text[:12000],
-            "job_description": job_text[:12000],
-        }
-    )
+    try:
+        gap = await agent.run(
+            {
+                "resume_json": resume_text[:12000],
+                "job_description": job_text[:12000],
+            }
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Analysis failed: {type(exc).__name__}: {exc}",
+        ) from exc
     skill_gap = gap.get("skill_gap", {})
+    analysis_mode = gap.get("analysis_mode") or "llm"
+    warning = scrape_warning
+    if analysis_mode == "heuristic":
+        heuristic_note = (
+            "AI scoring was busy/unavailable — used a fast keyword match instead. "
+            "You can still approve gaps and tailor; re-run Analyze later for a full LLM score."
+        )
+        warning = f"{warning} {heuristic_note}".strip() if warning else heuristic_note
     return {
         "status": "ok",
         "skill_gap": skill_gap,
@@ -168,7 +200,9 @@ async def analyze_jd_skills(
         "nice_to_have_missing": skill_gap.get("nice_to_have_missing", []),
         "qualifications_match": skill_gap.get("qualifications_match", ""),
         "scrape_source": scrape_source,
-        "scrape_warning": scrape_warning,
+        "scrape_warning": warning,
+        "analysis_mode": analysis_mode,
+        "llm_error": gap.get("llm_error"),
     }
 
 class TailorResumeRequest(BaseModel):
@@ -186,48 +220,90 @@ async def tailor_resume_manual(
     current_user: User = Depends(get_current_user)
 ):
     from app.application.agents.resume_optimizer import ResumeOptimizerAgent
-    from app.application.agents.skill_gap_agent import SkillGapAgent
-    from app.infrastructure.resume_library import extract_text, missing_skills_from_job
+    from app.application.agents.skill_gap_agent import (
+        SkillGapAgent,
+        heuristic_skill_gap,
+    )
+    from app.infrastructure.resume_library import extract_text
     from app.infrastructure.scraping import scrape_job_page
     from pathlib import Path
-    
-    source_dir = Path(settings.RESUME_SOURCE_DIR)
+
+    cfg = get_settings()
+    source_dir = Path(cfg.RESUME_SOURCE_DIR)
     file_path = source_dir / request.base_resume
-    
+
     if request.current_tailored_text:
-        # Iterative mode: use the already-tailored text as the base
         resume_text = request.current_tailored_text
-    elif not file_path.exists():
-        resume_text = "Senior Software Engineer with 5 years of experience."
     else:
+        if not file_path.exists():
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Resume file not found: {request.base_resume}. "
+                    "Pick a resume from the Tailor dropdown."
+                ),
+            )
         resume_text = extract_text(file_path)
-        
-    job_text = request.job_description
+        if not (resume_text or "").strip():
+            raise HTTPException(
+                status_code=422,
+                detail=f"Could not extract text from resume: {request.base_resume}",
+            )
+
+    job_text = (request.job_description or "").strip()
+    scrape_warning = None
     if request.job_url:
         scraped = await scrape_job_page(request.job_url)
-        if scraped.text:
-            job_text = scraped.text + "\n" + job_text
+        if scraped.source == "mock":
+            if job_text:
+                scrape_warning = (
+                    f"Could not scrape the URL ({scraped.error or 'blocked'}). "
+                    "Tailoring uses your pasted JD only."
+                )
+            else:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Could not scrape that URL. Paste the job description "
+                        "text and try again."
+                    ),
+                )
+        elif scraped.text:
+            job_text = scraped.text + ("\n" + job_text if job_text else "")
+
+    if not job_text.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Provide a job description (paste text or a scrapable URL).",
+        )
 
     missing = request.approved_skills
     if missing is None:
-        missing = missing_skills_from_job([], resume_text) 
-    
+        # Derive gaps from keyword heuristic when user skipped analyze step
+        gap = heuristic_skill_gap(resume_text, job_text)
+        missing = gap.missing_skills
+
     agent = ResumeOptimizerAgent()
-    opt = await agent.run(
-        {
-            "resume_json": resume_text[:12000],
-            "ats_score": {"missing_skills": missing},
-            "job_description": job_text[:12000],
-        }
-    )
+    try:
+        opt = await agent.run(
+            {
+                "resume_json": resume_text[:12000],
+                "ats_score": {"missing_skills": missing or []},
+                "job_description": job_text[:12000],
+            }
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     optimized = opt.get("optimized_resume", {})
 
-    # Auto-score the tailored resume to get the "after" ATS score
-    tailored_text = "\n".join([
-        optimized.get("summary", ""),
-        *optimized.get("tailored_bullets", []),
-        *optimized.get("added_keywords", []),
-    ])
+    tailored_text = "\n".join(
+        [
+            optimized.get("summary", ""),
+            *optimized.get("tailored_bullets", []),
+            *optimized.get("added_keywords", []),
+        ]
+    )
     gap_agent = SkillGapAgent()
     after_gap = await gap_agent.run(
         {
@@ -236,12 +312,14 @@ async def tailor_resume_manual(
         }
     )
     after_score = after_gap.get("skill_gap", {}).get("match_score", 0)
-    
+
     return {
         "status": "ok",
         "optimized_resume": optimized,
         "before_ats_score": request.before_ats_score,
         "after_ats_score": after_score,
+        "scrape_warning": scrape_warning,
+        "analysis_mode": after_gap.get("analysis_mode"),
     }
 
 
@@ -257,19 +335,34 @@ class DiscoverRequest(BaseModel):
 @router.post("/discover")
 async def trigger_discovery(
     request: DiscoverRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     from app.application.agents.job_discovery_agent import JobDiscoveryAgent
+    from app.application.services.knowledge import KnowledgeBaseService
+
     try:
-        agent = JobDiscoveryAgent()
-        jobs = await agent.discover_and_score_jobs(str(current_user.id), request.model_dump())
+        knowledge = KnowledgeBaseService(db)
+        # Ensure Vault has the curated job_portal KBs before searching them
+        try:
+            await knowledge.seed_job_portals(current_user.id)
+        except Exception as seed_exc:
+            logger.warning("Vault job_portal seed skipped: %s", seed_exc)
+
+        agent = JobDiscoveryAgent(knowledge_service=knowledge)
+        jobs = await agent.discover_and_score_jobs(
+            str(current_user.id), request.model_dump()
+        )
         return {"status": "ok", "jobs": jobs, "source": "discovery_agent"}
-    except Exception:
+    except Exception as exc:
         logger.exception("Job discovery failed")
         raise HTTPException(
             status_code=502,
-            detail="Job discovery failed — check LLM / Remotive / RemoteOK / Arbeitnow connectivity and try again",
-        )
+            detail=(
+                f"Job discovery failed: {type(exc).__name__}: {exc}. "
+                "Check Vault portals / Token Harbor and retry."
+            ),
+        ) from exc
 
 
 class DiscoverResumeAnalysisResponse(BaseModel):
@@ -353,48 +446,78 @@ async def analyze_resumes(
         ]
 
         def fallback():
+            # Prefer skills actually present in the resume over hardcoded Flutter defaults
+            from app.application.agents.skill_gap_agent import _KNOWN_SKILLS
+
+            low = all_text.lower()
+            found = [s for s in _KNOWN_SKILLS if s.lower() in low][:10]
+            stack = ", ".join(found) if found else "Software engineering"
+            roles = []
+            if any(s in low for s in ("flutter", "dart")):
+                roles.append("Flutter Developer")
+            if any(s in low for s in ("react", "next.js", "typescript")):
+                roles.append("Frontend Engineer")
+            if any(s in low for s in ("python", "fastapi", "django")):
+                roles.append("Backend Engineer")
+            if any(s in low for s in ("full stack", "fullstack")):
+                roles.append("Full Stack Developer")
+            if not roles:
+                roles = ["Software Engineer"]
             return DiscoverResumeAnalysisResponse(
-                targetRoles="Flutter Engineer, Full Stack Developer",
-                techStack="Flutter, Dart, FastAPI, React, LangGraph",
-                experienceLevel="Mid-Level (3-5y)",
-                locationHubs=["india"],
-                companyTypes=["Startups"],
+                targetRoles=", ".join(roles[:3]),
+                techStack=stack,
+                experienceLevel="Mid-Level (2-5y)",
+                locationHubs=["india"] if "india" in low or "mumbai" in low or "pune" in low or "bengaluru" in low or "bangalore" in low else ["remote"],
+                companyTypes=["Startups", "Mid-size"],
                 isRemote=True,
                 minSalary="1000000",
             )
 
-        result = await structured_generate(
-            DiscoverResumeAnalysisResponse,
-            messages,
-            fallback=fallback,
-            max_tokens=1500,
-        )
-        payload = result.model_dump()
-        payload["used_resumes"] = used
-        payload["available_resumes"] = available
-        payload["source"] = "library"
-        payload["note"] = (
-            f"Preferences inferred from: {', '.join(used)}"
-            if used
-            else "Analyzed resume library"
-        )
-        return payload
+        try:
+            result = await structured_generate(
+                DiscoverResumeAnalysisResponse,
+                messages,
+                fallback=fallback,
+                max_tokens=900,
+                timeout=45.0,
+            )
+            payload = result.model_dump()
+            payload["used_resumes"] = used
+            payload["available_resumes"] = available
+            payload["source"] = "library"
+            payload["note"] = (
+                f"Preferences inferred from: {', '.join(used)}"
+                if used
+                else "Analyzed resume library"
+            )
+            return payload
+        except Exception as llm_exc:
+            logging.warning("analyze-resumes LLM failed — keyword prefs: %s", llm_exc)
+            payload = fallback().model_dump()
+            payload["used_resumes"] = used
+            payload["available_resumes"] = available
+            payload["source"] = "fallback_heuristic"
+            payload["note"] = (
+                "AI was busy — preferences guessed from keywords in your resume. "
+                f"Files: {', '.join(used)}. Edit fields before running Discovery."
+            )
+            return payload
     except HTTPException:
         raise
     except Exception:
         logging.exception("Error analyzing resumes")
         return {
-            "targetRoles": "Flutter Engineer, Full Stack Developer, AI Engineer",
-            "techStack": "Flutter, Dart, FastAPI, React, Next.js, LangGraph, Python",
-            "experienceLevel": "Mid-Level (3-5y)",
-            "locationHubs": ["india", "europe"],
+            "targetRoles": "Software Engineer",
+            "techStack": "",
+            "experienceLevel": "Mid-Level (2-5y)",
+            "locationHubs": ["india"],
             "companyTypes": ["Startups", "Mid-size"],
             "isRemote": True,
-            "minSalary": "1200000",
+            "minSalary": "1000000",
             "used_resumes": [],
             "available_resumes": [],
             "source": "fallback_error",
-            "note": "Analysis failed — showing defaults. Try uploading a resume.",
+            "note": "Analysis failed — edit preferences manually, then run Discovery.",
         }
 
 

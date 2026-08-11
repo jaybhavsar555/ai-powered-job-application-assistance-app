@@ -83,6 +83,48 @@ async function mapFields(labels) {
   }
 }
 
+async function fetchResumeFile(applicationId) {
+  const { apiBase, token } = await getConfig();
+  if (!token) {
+    return { ok: false, error: "No token — log in from the extension popup." };
+  }
+  try {
+    let url = `${apiBase}/extension/resume-file`;
+    if (applicationId) {
+      url += `?application_id=${encodeURIComponent(applicationId)}`;
+    }
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 401) {
+      await chrome.storage.local.remove(["token"]);
+      return {
+        ok: false,
+        error: "Session expired — log in again in the extension popup.",
+      };
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      return { ok: false, error: `Resume HTTP ${res.status}: ${text.slice(0, 160)}` };
+    }
+    const buf = await res.arrayBuffer();
+    const bytes = Array.from(new Uint8Array(buf));
+    const cd = res.headers.get("content-disposition") || "";
+    const match = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(cd);
+    const filename = match
+      ? decodeURIComponent(match[1].replace(/"/g, "").trim())
+      : "resume.pdf";
+    const contentType =
+      res.headers.get("content-type") ||
+      (filename.toLowerCase().endsWith(".docx")
+        ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        : "application/pdf");
+    return { ok: true, bytes, filename, contentType };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "FETCH_PROFILE") {
     fetchProfile().then(sendResponse);
@@ -94,6 +136,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg?.type === "MAP_FIELDS") {
     mapFields(msg.labels).then(sendResponse);
+    return true;
+  }
+  if (msg?.type === "FETCH_RESUME_FILE") {
+    fetchResumeFile(msg.applicationId).then(sendResponse);
     return true;
   }
   return false;

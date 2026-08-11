@@ -45,7 +45,7 @@ function CanvasPageInner() {
 
   useEffect(() => {
     const fromQuery = searchParams.get("job_id")?.trim() || "";
-    if (fromQuery) {
+    if (fromQuery && fromQuery !== DEMO_JOB_ID) {
       setSelectedJobId(fromQuery);
       try {
         sessionStorage.setItem(SELECTED_JOB_STORAGE_KEY, fromQuery);
@@ -56,7 +56,8 @@ function CanvasPageInner() {
     }
     try {
       const stored = sessionStorage.getItem(SELECTED_JOB_STORAGE_KEY) || "";
-      if (stored) setSelectedJobId(stored);
+      if (stored && stored !== DEMO_JOB_ID) setSelectedJobId(stored);
+      else if (stored === DEMO_JOB_ID) sessionStorage.removeItem(SELECTED_JOB_STORAGE_KEY);
     } catch {
       /* ignore */
     }
@@ -64,6 +65,10 @@ function CanvasPageInner() {
 
   const onSelectJob = useCallback(
     (jobId: string) => {
+      if (jobId === DEMO_JOB_ID) {
+        setPickerError("Demo/mock jobs are disabled.");
+        return;
+      }
       setSelectedJobId(jobId);
       setPickerError(null);
       try {
@@ -73,7 +78,7 @@ function CanvasPageInner() {
         /* ignore */
       }
       const params = new URLSearchParams(searchParams.toString());
-      if (jobId && jobId !== DEMO_JOB_ID) params.set("job_id", jobId);
+      if (jobId) params.set("job_id", jobId);
       else params.delete("job_id");
       const q = params.toString();
       router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
@@ -82,8 +87,8 @@ function CanvasPageInner() {
   );
 
   const startWorkflow = (asResume = false) => {
-    if (!selectedJobId) {
-      setPickerError("Select a Tracker job (or Demo mock) before Simulate.");
+    if (!selectedJobId || selectedJobId === DEMO_JOB_ID) {
+      setPickerError("Select a real Tracker job before Simulate (demo/mock jobs are off).");
       return;
     }
     setPickerError(null);

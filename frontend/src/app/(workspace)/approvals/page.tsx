@@ -346,8 +346,8 @@ export default function ApprovalsPage() {
                   <a href={`${API_BASE_URL}/documents/package-download-job?folder=${encodeURIComponent(packagePath)}&kind=cover_docx`} className="inline-flex items-center gap-1.5 text-xs bg-secondary hover:bg-secondary/80 text-secondary-foreground px-3 py-1.5 rounded-md transition-colors">
                     <Download className="w-3.5 h-3.5" /> DOCX
                   </a>
-                  <button onClick={() => { navigator.clipboard.writeText(coverLetter); alert('Cover letter copied to clipboard!'); }} className="inline-flex items-center gap-1.5 text-xs border border-border hover:bg-muted px-3 py-1.5 rounded-md transition-colors">
-                    <Copy className="w-3.5 h-3.5" /> Copy Text
+                  <button onClick={() => { navigator.clipboard.writeText(coverLetter); }} className="inline-flex items-center gap-1.5 text-xs border border-border hover:bg-muted px-3 py-1.5 rounded-md transition-colors" title="Copied to clipboard when clicked">
+                    <Copy className="w-3.5 h-3.5" /> Copy
                   </button>
                 </div>
               </div>

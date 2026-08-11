@@ -30,37 +30,44 @@ async def _load_job(job_id: str) -> Optional[DBJob]:
 def _get_base_resume_text(job_details: dict) -> str:
     settings = get_settings()
     source = Path(settings.RESUME_SOURCE_DIR)
-    
+
     role_title = job_details.get("role_title") or "Role"
     jd = job_details.get("description_raw") or ""
-    
+
     role_family = detect_role_family(role_title, jd)
     base = pick_base_resume(source, role_family)
-    
+
     if base:
         resume_text = extract_text(base.path)
-        if resume_text:
+        if resume_text and len(resume_text.strip()) >= 80:
             return resume_text
-            
-    return "Mock base resume with Python and SQL."
+
+    raise RuntimeError(
+        f"No usable resume in RESUME_SOURCE_DIR={source}. "
+        "Add a PDF/DOCX template — refusing to invent a mock resume."
+    )
 
 
 async def job_intake_node(state: AgentState):
     agent = agent_registry.get_agent("job_intake_agent")
     job = await _load_job(state.get("job_id", ""))
 
-    if job:
-        agent_state = {
-            "job_description_raw": job.description_raw or "",
-            "title": job.role_title or "",
-            "company": (job.description_normalized or {}).get("company_name", ""),
-        }
-    else:
-        agent_state = {
-            "job_description_raw": "Mock raw job content from URL",
-            "title": "Software Engineer",
-            "company": "Tech Corp",
-        }
+    if not job:
+        raise RuntimeError(
+            f"Job id {state.get('job_id')!r} not found in Tracker. "
+            "Select a real Wishlist/Ready job — Demo/mock jobs are disabled."
+        )
+
+    agent_state = {
+        "job_description_raw": job.description_raw or "",
+        "title": job.role_title or "",
+        "company": (job.description_normalized or {}).get("company_name", ""),
+    }
+    if not (job.description_raw or "").strip():
+        raise RuntimeError(
+            f"Job {job.id} has an empty description. "
+            "Re-import with JD text or a scrapeable URL — no fake JD will be invented."
+        )
 
     result = await agent.execute(agent_state, application_id=state.get("job_id"))
     return {

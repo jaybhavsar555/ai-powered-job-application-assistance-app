@@ -130,27 +130,17 @@ def _hints_from_html(html: str, url: str) -> tuple[Optional[str], Optional[str],
 
 
 def _mock_body(url: str) -> ScrapeResult:
-    host = urlparse(url).hostname or "example.com"
-    company = host.replace("www.", "").split(".")[0].title()
-    text = (
-        f"Software Engineer at {company}\n\n"
-        f"Source URL: {url}\n\n"
-        "We are hiring a Software Engineer to build backend services with Python, "
-        "FastAPI, PostgreSQL, Docker, and AWS. Nice to have: LangGraph, Redis, Qdrant.\n\n"
-        "Responsibilities:\n"
-        "- Design and implement APIs\n"
-        "- Write tests and observability hooks\n"
-        "- Collaborate with product on career tooling\n\n"
-        "Benefits: Health insurance, remote work, 401k.\n"
-        "(Demo scrape — Playwright/Chromium unavailable or page blocked.)"
-    )
+    """Failed scrape placeholder — never invents a fake job description."""
     return ScrapeResult(
         url=url,
-        text=text,
-        title="Software Engineer",
-        company=company,
-        source="mock",
-        error="Playwright/httpx scrape unavailable; using demo body",
+        text="",
+        title=None,
+        company=None,
+        source="failed",
+        error=(
+            "Could not scrape this URL (Playwright/httpx/Jina all failed). "
+            "Paste the job description text manually — no demo JD was invented."
+        ),
     )
 
 
@@ -279,9 +269,8 @@ async def _scrape_playwright(url: str) -> ScrapeResult:
 async def scrape_job_page(url: str) -> ScrapeResult:
     """
     Scrape a job posting URL.
-    Order: Playwright → httpx → Jina AI Reader → mock.
-    Jina handles JS-rendered SPAs (Next.js, React, Vue) without needing Chromium.
-    Never raises; always returns usable text for the intake agent.
+    Order: Playwright → httpx → Jina AI Reader → failed (empty, with error).
+    Never invents a fake JD.
     """
     errors: list[str] = []
 
@@ -295,12 +284,14 @@ async def scrape_job_page(url: str) -> ScrapeResult:
     except Exception as exc:
         errors.append(f"httpx: {exc}")
 
-    # Jina AI Reader: renders JS-heavy pages server-side, returns clean markdown
     try:
         return await _scrape_jina(url)
     except Exception as exc:
         errors.append(f"jina: {exc}")
 
-    mock = _mock_body(url)
-    mock.error = "; ".join(errors) if errors else mock.error
-    return mock
+    failed = _mock_body(url)
+    failed.error = (
+        "; ".join(errors)
+        + " — paste description_raw manually (no invented JD)."
+    )
+    return failed

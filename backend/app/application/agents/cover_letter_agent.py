@@ -31,8 +31,15 @@ class CoverLetterAgent(OSAgent):
 
     def _mock(self) -> CoverLetter:
         return CoverLetter(
-            content="Dear Hiring Manager,\n\nI am thrilled to apply for this position. Given your recent Series B funding and focus on scaling Kubernetes, my background in deploying highly available microservices makes me an ideal fit.\n\nSincerely,\nThe Candidate",
-            hooks_used=["Series B funding", "Kubernetes scaling"],
+            content=(
+                "Dear Hiring Manager,\n\n"
+                "I am writing to express interest in this role. My background aligns with "
+                "the core requirements in the posting, and I would welcome the chance to "
+                "contribute quickly on your team.\n\n"
+                "(Draft generated while AI was unavailable — re-run packaging when the LLM is free.)\n\n"
+                "Sincerely,\nThe Candidate"
+            ),
+            hooks_used=["role requirements"],
         )
 
     async def run(self, state: Dict[str, Any], *args, **kwargs) -> Dict[str, Any]:

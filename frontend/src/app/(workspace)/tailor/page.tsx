@@ -175,10 +175,17 @@ export default function TailorPage() {
           job_url: jobUrl,
           base_resume: selectedBaseResume || baseResumes[0]?.name,
         }),
+        signal: AbortSignal.timeout(300_000),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(typeof body.detail === "string" ? body.detail : "Analysis failed");
+        const detail =
+          typeof body.detail === "string"
+            ? body.detail
+            : Array.isArray(body.detail)
+              ? body.detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join("; ")
+              : null;
+        throw new Error(detail || `Analysis failed (HTTP ${res.status})`);
       }
       const data = await res.json();
       const gap = data.skill_gap || {};
@@ -194,9 +201,21 @@ export default function TailorPage() {
         qualificationsMatch: data.qualifications_match ?? gap.qualifications_match ?? "",
       });
       if (data.scrape_warning) setScrapeWarning(data.scrape_warning);
+      else if (data.analysis_mode === "heuristic") {
+        setScrapeWarning(
+          "AI was busy — used fast keyword matching. You can still tailor; re-run Analyze later for a full LLM score."
+        );
+      }
       setStep(2);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Analysis failed");
+      const msg = err instanceof Error ? err.message : "Analysis failed";
+      if (/abort|timeout|Failed to fetch|network/i.test(msg)) {
+        setError(
+          "Analysis did not finish in time. Paste the full JD text (not only a URL) and retry — the app will use a fast keyword match if Token Harbor is still busy."
+        );
+      } else {
+        setError(msg);
+      }
     } finally {
       setIsTailoring(false);
     }
@@ -221,6 +240,7 @@ export default function TailorPage() {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(300_000),
       });
       if (!res.ok) {
         const b = await res.json().catch(() => ({}));
@@ -231,7 +251,12 @@ export default function TailorPage() {
       setTailorState({ afterAtsScore: data.after_ats_score ?? null });
       setStep(3);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Tailor failed");
+      const msg = err instanceof Error ? err.message : "Tailor failed";
+      if (/abort|timeout|Failed to fetch|network/i.test(msg)) {
+        setError("Tailor timed out — retry in a moment (Token Harbor may be busy).");
+      } else {
+        setError(msg);
+      }
     } finally {
       setIsTailoring(false);
     }
@@ -304,8 +329,14 @@ export default function TailorPage() {
           job_url: jobUrl,
           base_resume: selectedBaseResume || baseResumes[0]?.name,
         }),
+        signal: AbortSignal.timeout(300_000),
       });
-      if (!res.ok) throw new Error("Re-analysis failed");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(
+          typeof body.detail === "string" ? body.detail : "Re-analysis failed"
+        );
+      }
       const data = await res.json();
       const gap = data.skill_gap || {};
       const missing = (gap.missing_skills || []).filter(
@@ -442,7 +473,7 @@ export default function TailorPage() {
                   {isTailoring ? (
                     <span className="h-5 w-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   ) : <Wand2 className="h-5 w-5" />}
-                  Analyze JD & Score Resume
+                  {isTailoring ? "Analyzing (may take 1–2 min)…" : "Analyze JD & Score Resume"}
                 </button>
               </div>
             </div>
@@ -682,9 +713,9 @@ export default function TailorPage() {
                   <div className="flex items-center gap-2 p-4 border-b border-border bg-muted/40">
                     <CheckCircle className="h-4 w-4 text-emerald-500" />
                     <span className="font-semibold text-sm">Tailored Content</span>
-                    {finalState.tailored_resume.added_keywords?.length > 0 && (
+                    {(finalState.tailored_resume.added_keywords?.length ?? 0) > 0 && (
                       <span className="ml-auto text-xs text-muted-foreground">
-                        {finalState.tailored_resume.added_keywords.length} keywords added
+                        {(finalState.tailored_resume.added_keywords ?? []).length} keywords added
                       </span>
                     )}
                   </div>
@@ -695,21 +726,21 @@ export default function TailorPage() {
                         <p className="text-sm leading-relaxed whitespace-pre-wrap">{finalState.tailored_resume.summary}</p>
                       </div>
                     )}
-                    {finalState.tailored_resume.tailored_bullets?.length > 0 && (
+                    {(finalState.tailored_resume.tailored_bullets?.length ?? 0) > 0 && (
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Tailored Bullets</p>
                         <ul className="text-sm space-y-1.5 list-disc pl-4">
-                          {finalState.tailored_resume.tailored_bullets.map((b: string, i: number) => (
+                          {(finalState.tailored_resume.tailored_bullets ?? []).map((b: string, i: number) => (
                             <li key={i} className="leading-relaxed">{b}</li>
                           ))}
                         </ul>
                       </div>
                     )}
-                    {finalState.tailored_resume.added_keywords?.length > 0 && (
+                    {(finalState.tailored_resume.added_keywords?.length ?? 0) > 0 && (
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Added Keywords</p>
                         <div className="flex flex-wrap gap-1.5">
-                          {finalState.tailored_resume.added_keywords.map((k: string, i: number) => (
+                          {(finalState.tailored_resume.added_keywords ?? []).map((k: string, i: number) => (
                             <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">{k}</span>
                           ))}
                         </div>

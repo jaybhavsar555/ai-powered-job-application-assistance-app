@@ -1,8 +1,8 @@
 """
 Lightweight company signal gathering for the Company Research agent.
 
-Tries: (1) company site from job URL host, (2) DuckDuckGo HTML snippets,
-(3) deterministic mock — never raises.
+Tries: (1) company site from job URL host, (2) DuckDuckGo HTML snippets.
+On total failure returns empty raw_text with source=failed — never invents blurbs.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ class CompanySignals:
     company_name: str
     raw_text: str
     sources: List[str] = field(default_factory=list)
-    source: str = "mock"  # site | serp | mock
+    source: str = "failed"  # site | serp | failed
     error: Optional[str] = None
 
 
@@ -79,21 +79,18 @@ async def _fetch_serp_snippets(company: str, client: httpx.AsyncClient) -> str:
     return "\n\n".join(cleaned)[:8000]
 
 
-def _mock_signals(company: str) -> CompanySignals:
-    name = company or "Target Company"
-    text = (
-        f"{name} is a growth-stage technology company building developer and "
-        f"productivity tooling. Public signals suggest a modern cloud stack "
-        f"(Python, Kubernetes, AWS), a recent funding round (Series B), and "
-        f"emphasis on remote-friendly engineering culture. Hiring themes: "
-        f"scalability, AI-assisted workflows, and reliable backend services."
-    )
+def _failed_signals(company: str, errors: list[str]) -> CompanySignals:
+    name = company or "Unknown Company"
     return CompanySignals(
         company_name=name,
-        raw_text=text,
-        sources=["mock://company-research"],
-        source="mock",
-        error="Live research unavailable; using demo signals",
+        raw_text="",
+        sources=[],
+        source="failed",
+        error=(
+            "; ".join(errors)
+            if errors
+            else "Live company research unavailable — no invented company blurb."
+        ),
     )
 
 
@@ -141,6 +138,4 @@ async def gather_company_signals(
         except Exception as exc:
             errors.append(f"serp: {exc}")
 
-    mock = _mock_signals(name)
-    mock.error = "; ".join(errors) if errors else mock.error
-    return mock
+    return _failed_signals(name, errors)

@@ -85,7 +85,6 @@ export function CanvasJobPicker({ selectedJobId, onSelect, disabled }: Props) {
                 {opt.label} ({opt.stage})
               </option>
             ))}
-            <option value={DEMO_JOB_ID}>Demo mock job (no Tracker row)</option>
           </select>
         )}
         <button
@@ -102,10 +101,14 @@ export function CanvasJobPicker({ selectedJobId, onSelect, disabled }: Props) {
       {!loading && !hasRealJobs && (
         <p className="text-[10px] text-muted-foreground">
           Import a posting in{" "}
-          <Link href="/tracker" className="text-primary hover:underline">
-            Tracker
+          <Link href="/jobs" className="text-primary hover:underline">
+            Jobs
           </Link>{" "}
-          first, or use Demo mock job.
+          or{" "}
+          <Link href="/discovery" className="text-primary hover:underline">
+            Discovery
+          </Link>{" "}
+          first. Demo/mock jobs are disabled so failures stay visible.
         </p>
       )}
     </div>

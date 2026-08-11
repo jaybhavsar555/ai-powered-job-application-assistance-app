@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from uuid import UUID
 from datetime import datetime
 
@@ -22,6 +22,12 @@ class RecruiterOut(BaseModel):
     name: str
     linkedin_url: Optional[str] = None
     email: Optional[str] = None
+
+
+class RecruiterUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    email: Optional[str] = Field(None, max_length=320)
+    linkedin_url: Optional[str] = Field(None, max_length=500)
 
 
 @router.get("", response_model=List[RecruiterOut])
@@ -60,3 +66,47 @@ async def list_recruiters(
             )
         )
     return recruiters
+
+
+@router.patch("/{recruiter_id}", response_model=RecruiterOut)
+async def update_recruiter(
+    recruiter_id: UUID,
+    data: RecruiterUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update recruiter contact for companies linked to the current user's jobs."""
+    stmt = (
+        select(DBRecruiter, DBCompany)
+        .join(DBCompany, DBRecruiter.company_id == DBCompany.id)
+        .join(DBJob, DBJob.company_id == DBCompany.id)
+        .where(DBRecruiter.id == recruiter_id, DBJob.user_id == current_user.id)
+    )
+    row = (await db.execute(stmt)).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Recruiter not found")
+    recruiter, company = row
+
+    if data.name is not None:
+        recruiter.name = data.name.strip()
+    if data.email is not None:
+        email = data.email.strip() or None
+        if email and "@" not in email:
+            raise HTTPException(status_code=400, detail="Email looks invalid")
+        recruiter.email = email
+    if data.linkedin_url is not None:
+        linkedin = data.linkedin_url.strip() or None
+        recruiter.linkedin_url = linkedin
+
+    await db.commit()
+    await db.refresh(recruiter)
+    return RecruiterOut(
+        id=recruiter.id,
+        created_at=recruiter.created_at,
+        updated_at=recruiter.updated_at,
+        company_id=recruiter.company_id,
+        company_name=company.name if company else None,
+        name=recruiter.name,
+        linkedin_url=recruiter.linkedin_url,
+        email=recruiter.email,
+    )

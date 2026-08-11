@@ -28,22 +28,19 @@ class CompanyResearchAgent(OSAgent):
     capabilities = ["web"]
 
     def _mock(self, company: str) -> CompanyResearchResult:
-        name = company or "Tech Corp"
+        name = company or "Unknown Company"
         return CompanyResearchResult(
             company_name=name,
             summary=(
-                f"{name} builds cloud-native developer tooling with a focus on "
-                "reliable backend systems and AI-assisted workflows."
+                f"No live research available for {name}. "
+                "Re-run with a working LLM + network, or paste company notes manually."
             ),
-            industry="Enterprise Software",
-            tech_stack=["Python", "Kubernetes", "AWS"],
-            recent_news_hooks=[
-                "Recent Series B funding to scale platform engineering",
-                "Push into Kubernetes-based deployment automation",
-            ],
-            culture_signals=["Remote-friendly", "Strong engineering ownership"],
-            funding_or_stage="Series B",
-            sources=["mock://company-research"],
+            industry=None,
+            tech_stack=[],
+            recent_news_hooks=[],
+            culture_signals=[],
+            funding_or_stage=None,
+            sources=["unavailable"],
         )
 
     async def run(self, state: Dict[str, Any], *args, **kwargs) -> Dict[str, Any]:
@@ -57,6 +54,16 @@ class CompanyResearchAgent(OSAgent):
         system_prompt = prompt_registry.get_prompt(self.name)
 
         signals = await gather_company_signals(company, job_url)
+
+        if signals.source == "failed" or len((signals.raw_text or "").strip()) < 80:
+            unavailable = self._mock(company)
+            payload = unavailable.model_dump()
+            payload["_gather"] = {
+                "source": signals.source,
+                "error": signals.error or "insufficient live research text",
+            }
+            payload["_unavailable"] = True
+            return {"company_research": payload}
 
         result = await structured_generate(
             CompanyResearchResult,

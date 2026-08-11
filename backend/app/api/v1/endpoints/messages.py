@@ -34,12 +34,73 @@ def _package_exists(app: Optional[DBApplication]) -> bool:
     return any(raw and Path(str(raw)).is_file() for raw in files.values())
 
 
-async def _mark_follow_up_cleared(db: AsyncSession, app: Optional[DBApplication]) -> None:
+def _package_host_hint(folder: Optional[str]) -> Optional[str]:
+    """Map container path to host-friendly folder for copy/reveal."""
+    if not folder:
+        return None
+    raw = str(folder).replace("\\", "/").rstrip("/")
+    if "/data/packages/" in raw or raw.startswith("/data/packages"):
+        name = raw.split("/")[-1]
+        return f"data/packages/{name}"
+    return str(folder)
+
+
+def _resume_attachment_specs(app: Optional[DBApplication]) -> list[tuple[Path, str]]:
+    """Prefer PDF resume, else DOCX — for SMTP attach."""
+    if not app:
+        return []
+    state = app.workflow_state or {}
+    pkg = state.get("apply_package") if isinstance(state.get("apply_package"), dict) else {}
+    files = pkg.get("files") or {}
+    for kind in ("resume_pdf", "resume_docx"):
+        raw = files.get(kind)
+        if not raw:
+            continue
+        path = Path(str(raw))
+        if path.is_file():
+            return [(path, path.name)]
+    return []
+
+
+async def _mark_follow_up_cleared(
+    db: AsyncSession,
+    app: Optional[DBApplication],
+    *,
+    message_id: Optional[UUID] = None,
+) -> None:
     if not app:
         return
     state = copy.deepcopy(dict(app.workflow_state or {}))
-    state["follow_up_sent"] = True
     state["follow_up_sent_at"] = datetime.utcnow().isoformat()
+    follow_ups = state.get("follow_ups")
+    if isinstance(follow_ups, list) and follow_ups:
+        mid = str(message_id) if message_id else None
+        for entry in follow_ups:
+            if not isinstance(entry, dict) or entry.get("sent"):
+                continue
+            if mid and str(entry.get("message_id")) == mid:
+                entry["sent"] = True
+                break
+        else:
+            # Fallback: mark first due unsent entry
+            for entry in follow_ups:
+                if isinstance(entry, dict) and not entry.get("sent"):
+                    entry["sent"] = True
+                    break
+        state["follow_ups"] = follow_ups
+        pending = next(
+            (e for e in follow_ups if isinstance(e, dict) and not e.get("sent")),
+            None,
+        )
+        if pending:
+            state["follow_up_sent"] = False
+            state["follow_up_due_at"] = pending.get("due_at")
+            state["follow_up_message_id"] = pending.get("message_id")
+            state["follow_up_days"] = pending.get("days")
+        else:
+            state["follow_up_sent"] = True
+    else:
+        state["follow_up_sent"] = True
     app.workflow_state = state
     flag_modified(app, "workflow_state")
     await db.flush()
@@ -59,6 +120,7 @@ class MessageOut(BaseModel):
     content: str
     message_type: str
     status: str
+    recruiter_id: Optional[UUID] = None
     recruiter_name: Optional[str] = None
     recruiter_email: Optional[str] = None
     recruiter_linkedin: Optional[str] = None
@@ -71,12 +133,23 @@ class MessageOut(BaseModel):
     job_id: Optional[UUID] = None
     attachments: List[MessageAttachment] = []
     package_folder: Optional[str] = None
+    package_folder_hint: Optional[str] = None
     package_hint: Optional[str] = None
+    contact_ready: bool = False
+    smtp_configured: bool = False
 
 
 class MessageUpdate(BaseModel):
     subject_line: Optional[str] = Field(None, min_length=3)
     body: Optional[str] = Field(None, min_length=20)
+
+
+class MessageContactUpdate(BaseModel):
+    """Paste recruiter contact so cold email / LinkedIn note can land."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    email: Optional[str] = Field(None, max_length=320)
+    linkedin_url: Optional[str] = Field(None, max_length=500)
 
 
 def _parse_subject_body(content: str) -> tuple[str, str]:
@@ -139,15 +212,18 @@ def _to_out(m: DBMessage) -> MessageOut:
         company_name = company.name
     elif job and job.description_normalized:
         company_name = job.description_normalized.get("company_name")
+    email = (recruiter.email if recruiter else None) or None
+    linkedin = (recruiter.linkedin_url if recruiter else None) or None
     return MessageOut(
         id=m.id,
         created_at=m.created_at,
         content=m.content,
         message_type=m.message_type,
         status=m.status,
+        recruiter_id=recruiter.id if recruiter else None,
         recruiter_name=recruiter.name if recruiter else None,
-        recruiter_email=recruiter.email if recruiter else None,
-        recruiter_linkedin=recruiter.linkedin_url if recruiter else None,
+        recruiter_email=email,
+        recruiter_linkedin=linkedin,
         role_title=job.role_title if job else None,
         company_name=company_name,
         subject_line=subject or None,
@@ -159,7 +235,10 @@ def _to_out(m: DBMessage) -> MessageOut:
         job_id=job.id if job else None,
         attachments=attachments,
         package_folder=folder,
+        package_folder_hint=_package_host_hint(folder),
         package_hint=hint,
+        contact_ready=bool((email or "").strip() or (linkedin or "").strip()),
+        smtp_configured=MailService().smtp_configured,
     )
 
 
@@ -236,6 +315,87 @@ async def update_message_draft(
     return _to_out(refreshed)
 
 
+@router.patch("/{message_id}/contact", response_model=MessageOut)
+async def update_message_contact(
+    message_id: UUID,
+    data: MessageContactUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Paste recruiter name / email / LinkedIn on a draft.
+    Empty To: emails get zero interviews — this is the manual gate.
+    """
+    db_message = await _load_user_message(db, message_id, current_user.id)
+    if db_message.status == "Sent":
+        raise HTTPException(status_code=400, detail="Cannot edit contact on a sent message")
+
+    email = (data.email or "").strip() or None
+    linkedin = (data.linkedin_url or "").strip() or None
+    name = (data.name or "").strip() or None
+
+    if email and "@" not in email:
+        raise HTTPException(status_code=400, detail="Email looks invalid")
+    if linkedin and "linkedin.com" not in linkedin.lower() and not linkedin.startswith("http"):
+        linkedin = f"https://www.linkedin.com/in/{linkedin.lstrip('/')}"
+
+    if not email and not linkedin and not name:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide at least an email, LinkedIn URL, or name",
+        )
+
+    app = db_message.application
+    job = app.job if app else None
+    company = job.company if job else None
+    if company is None and job is not None:
+        # Ensure a company row so recruiter FK works
+        company_name = (
+            (job.description_normalized or {}).get("company_name")
+            if job.description_normalized
+            else None
+        ) or "Unknown Company"
+        company = DBCompany(name=str(company_name), research_data={})
+        db.add(company)
+        await db.flush()
+        job.company_id = company.id
+
+    if company is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Message has no company — re-run Canvas or import the job again",
+        )
+
+    recruiter = db_message.recruiter
+    if recruiter is None:
+        recruiter = DBRecruiter(
+            company_id=company.id,
+            name=name or "Hiring Team",
+            email=email,
+            linkedin_url=linkedin,
+        )
+        db.add(recruiter)
+        await db.flush()
+        db_message.recruiter_id = recruiter.id
+    else:
+        if name:
+            recruiter.name = name
+        if data.email is not None:
+            recruiter.email = email
+        if data.linkedin_url is not None:
+            recruiter.linkedin_url = linkedin
+
+    if app:
+        state = copy.deepcopy(dict(app.workflow_state or {}))
+        state["recruiter_id"] = str(recruiter.id)
+        app.workflow_state = state
+        flag_modified(app, "workflow_state")
+
+    await db.commit()
+    refreshed = await _load_user_message(db, db_message.id, current_user.id)
+    return _to_out(refreshed)
+
+
 @router.post("/{message_id}/regenerate", response_model=MessageOut)
 async def regenerate_message(
     message_id: UUID,
@@ -283,7 +443,7 @@ async def regenerate_message(
             "recruiter_email": db_message.recruiter.email if db_message.recruiter else None,
         },
         "company": company_name,
-        "candidate_name": "Jay Padmakar Bhavsar",
+        "candidate_name": None,
     }
 
     try:
@@ -322,13 +482,28 @@ async def send_message(
         raise HTTPException(status_code=400, detail="Message already sent")
 
     recruiter = db_message.recruiter
-    to_email = recruiter.email if recruiter else None
+    to_email = (recruiter.email if recruiter else None) or None
+    linkedin = (recruiter.linkedin_url if recruiter else None) or None
 
-    if not to_email:
+    if not to_email and not linkedin:
         raise HTTPException(
             status_code=400,
-            detail="Recruiter has no email — copy the draft and send manually, or add an email on Recruiters.",
+            detail=(
+                "Add a recruiter email or LinkedIn URL on this draft before send. "
+                "Empty To: gets zero interviews."
+            ),
         )
+
+    if not to_email and linkedin:
+        return {
+            "success": False,
+            "contact_linkedin_only": True,
+            "linkedin_url": linkedin,
+            "message": (
+                "No email on file — open LinkedIn to send a note, then click Mark sent. "
+                "Paste an email if you want mailto/SMTP instead."
+            ),
+        }
 
     app = db_message.application
     if app and not _package_exists(app) and not force:
@@ -361,37 +536,61 @@ async def send_message(
     body = parsed_body or db_message.content or ""
 
     mail_service = MailService()
+    attach_specs = _resume_attachment_specs(app)
+    attachments, folder, _hint = _attachments_from_state(app)
+    resume_att = next((a for a in attachments if a.kind == "resume_pdf" and a.exists), None)
+    if resume_att is None:
+        resume_att = next((a for a in attachments if a.kind == "resume_docx" and a.exists), None)
+
     if not mail_service.smtp_configured:
         from urllib.parse import quote
-        from app.core.config import get_settings
 
-        settings = get_settings()
         mailto = (
             f"mailto:{quote(to_email)}?subject={quote(subject)}"
+            f"&body={quote(body)}"
+        )
+        gmail = (
+            "https://mail.google.com/mail/?view=cm&fs=1"
+            f"&to={quote(to_email)}"
+            f"&su={quote(subject)}"
             f"&body={quote(body)}"
         )
         return {
             "success": False,
             "smtp_configured": False,
             "mailto": mailto,
+            "gmail_url": gmail,
+            "package_folder": folder,
+            "package_folder_hint": _package_host_hint(folder),
+            "resume_download_url": resume_att.download_url if resume_att else None,
+            "resume_filename": resume_att.name if resume_att else None,
             "message": (
-                "SMTP is not configured — copy the draft or open mailto. "
-                "After you send, click Mark sent so follow-ups clear."
-                if settings.is_production
-                else "SMTP not set — use mailto/copy. Click Mark sent after you send."
+                "SMTP not set — use Download PDF & open Gmail (paperclip the file), "
+                "or copy the package folder path. Configure SMTP_* for true send-with-attach. "
+                "Click Mark sent after you send."
             ),
         }
 
     try:
-        mail_service.send_email(to_email=to_email, subject=subject, body=body)
+        mail_service.send_email(
+            to_email=to_email,
+            subject=subject,
+            body=body,
+            attachments=attach_specs,
+        )
         db_message.status = "Sent"
         if (db_message.message_type or "").lower().replace("_", "") == "followup":
-            await _mark_follow_up_cleared(db, app)
+            await _mark_follow_up_cleared(db, app, message_id=db_message.id)
         await db.commit()
         return {
             "success": True,
             "smtp_configured": True,
-            "message": "Email sent successfully",
+            "attached": [name for _, name in attach_specs],
+            "message": (
+                f"Email sent with {len(attach_specs)} attachment(s)."
+                if attach_specs
+                else "Email sent (no package file found to attach — package first next time)."
+            ),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
@@ -409,6 +608,6 @@ async def mark_message_sent(
         return {"success": True, "status": "Sent", "already": True}
     db_message.status = "Sent"
     if (db_message.message_type or "").lower().replace("_", "") == "followup":
-        await _mark_follow_up_cleared(db, db_message.application)
+        await _mark_follow_up_cleared(db, db_message.application, message_id=db_message.id)
     await db.commit()
     return {"success": True, "status": "Sent"}

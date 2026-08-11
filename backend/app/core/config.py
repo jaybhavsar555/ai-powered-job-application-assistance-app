@@ -45,14 +45,17 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
     OLLAMA_API_KEY: str = "ollama"
     OLLAMA_MODEL: str = "qwen2.5:3b"
-    OLLAMA_MAX_TOKENS: int = 200
+    OLLAMA_MAX_TOKENS: int = 400
     OLLAMA_NUM_CTX: int = 2048
     OLLAMA_KEEP_ALIVE: str = "30m"
-    OLLAMA_TIMEOUT_SECONDS: float = 75.0
+    OLLAMA_TIMEOUT_SECONDS: float = 300.0
     OLLAMA_NUM_THREAD: int = 0
     LLM_TIMEOUT_SECONDS: float = 45.0
     LLM_MAX_TOKENS: int = 700
     LLM_FORCE_MOCK: bool = False
+    # When false (default), Canvas cannot select "mock" and agents never invent
+    # fake JD/resume/recruiter content on LLM failure — errors surface instead.
+    LLM_ALLOW_MOCK: bool = False
 
     CHECKPOINT_BACKEND: str = "postgres"
 
@@ -75,6 +78,17 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASS: str = ""
 
+    # Optional Token Harbor gateway (OpenAI-compatible) — https://tokenharbor.ai/docs/getting-started/quickstart
+    TOKENHARBOR_API_KEY: str = ""
+    TOKENHARBOR_BASE_URL: str = "https://tokenharbor.ai/v1"
+    # Structured agents: prefer a chat/completions model (not coding-only orchestra).
+    # Prefer free catalog ids for daily Career OS agents (structured JSON).
+    # See https://tokenharbor.ai/docs/api/models and /models — e.g. kimi-k3:free,
+    # deepseek-v4-flash:free. Paid upgrades: deepseek-v4-flash, gpt-5.6-luna, claude-sonnet-5.
+    TOKENHARBOR_MODEL: str = "kimi-k3:free"
+    TOKENHARBOR_TIMEOUT_SECONDS: float = 90.0
+    TOKENHARBOR_MAX_TOKENS: int = 1200
+
     # Phase C — gated Auto Apply (extension only; LinkedIn never allowed by default)
     AUTO_APPLY_ENABLED: bool = True
     AUTO_APPLY_REQUIRE_CONSENT: bool = True
@@ -87,9 +101,11 @@ class Settings(BaseSettings):
     )
     AUTO_APPLY_BLOCKLIST: str = "linkedin.com,www.linkedin.com"
 
-    # Phase D — discovery sources (comma-separated)
-    JOB_DISCOVERY_SOURCES: str = "remotive,remoteok,arbeitnow"
-    JOB_DISCOVERY_PER_SOURCE: int = 4
+    # Discovery: Vault job_portal KBs first; Remotive/RemoteOK/Arbeitnow fill gaps
+    JOB_DISCOVERY_SOURCES: str = "vault_portals,remotive,remoteok,arbeitnow"
+    JOB_DISCOVERY_PER_SOURCE: int = 3
+    JOB_DISCOVERY_VAULT_LIMIT: int = 12
+    JOB_DISCOVERY_MAX_RESULTS: int = 15
 
     model_config = SettingsConfigDict(
         env_file=".env",

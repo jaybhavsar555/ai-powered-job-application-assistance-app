@@ -17,6 +17,11 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { usePanelStore } from "@/store/panelStore";
+import {
+  PageMessageBanner,
+  messageFromError,
+  type PageMessage,
+} from "@/components/ui/PageMessageBanner";
 
 /** Navigate outside React state rules (mailto / in-app CTA). */
 function hardNavigate(url: string) {
@@ -37,6 +42,7 @@ interface Message {
   content: string;
   message_type: string;
   status: string;
+  recruiter_id?: string | null;
   recruiter_name: string | null;
   recruiter_email: string | null;
   recruiter_linkedin: string | null;
@@ -48,7 +54,11 @@ interface Message {
   application_id?: string | null;
   job_id?: string | null;
   attachments?: Attachment[];
+  package_folder?: string | null;
+  package_folder_hint?: string | null;
   package_hint?: string | null;
+  contact_ready?: boolean;
+  smtp_configured?: boolean;
 }
 
 function parseSubjectBody(content: string): { subject: string; body: string } {
@@ -72,9 +82,21 @@ export default function OutreachPage() {
   const [drafts, setDrafts] = useState<
     Record<string, { subject: string; body: string; dirty: boolean }>
   >({});
+  const [contacts, setContacts] = useState<
+    Record<
+      string,
+      { name: string; email: string; linkedin: string; dirty: boolean; saving?: boolean }
+    >
+  >({});
   const token = useAuthStore((s) => s.token);
   const setPreview = usePanelStore((s) => s.setPreview);
   const openMobilePanel = usePanelStore((s) => s.openMobilePanel);
+  const [pageMessage, setPageMessage] = useState<PageMessage | null>(null);
+
+  const flash = (tone: PageMessage["tone"], title: string, detail: string) =>
+    setPageMessage({ tone, title, detail });
+  const flashErr = (raw: unknown, title = "Action failed") =>
+    setPageMessage(messageFromError(raw, title));
 
   useEffect(() => {
     const fetchMessages = async () => {
@@ -97,6 +119,19 @@ export default function OutreachPage() {
             };
           }
           setDrafts(next);
+          const nextContacts: Record<
+            string,
+            { name: string; email: string; linkedin: string; dirty: boolean }
+          > = {};
+          for (const msg of data) {
+            nextContacts[msg.id] = {
+              name: msg.recruiter_name || "",
+              email: msg.recruiter_email || "",
+              linkedin: msg.recruiter_linkedin || "",
+              dirty: false,
+            };
+          }
+          setContacts(nextContacts);
         }
       } catch (err) {
         console.error("Failed to fetch messages", err);
@@ -135,7 +170,7 @@ export default function OutreachPage() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        alert(err.detail || "Failed to regenerate draft");
+        flashErr(err.detail || "Failed to regenerate draft", "Regenerate failed");
         return;
       }
       const updated: Message = await res.json();
@@ -151,7 +186,7 @@ export default function OutreachPage() {
       }));
     } catch (err) {
       console.error(err);
-      alert("Error regenerating draft");
+      flashErr("Error regenerating draft", "Regenerate failed");
     } finally {
       setRegenId(null);
     }
@@ -172,7 +207,7 @@ export default function OutreachPage() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        alert(err.detail || "Failed to save");
+        flashErr(err.detail || "Failed to save", "Save failed");
         return;
       }
       const updated: Message = await res.json();
@@ -183,7 +218,7 @@ export default function OutreachPage() {
       }));
     } catch (err) {
       console.error(err);
-      alert("Error saving draft");
+      flashErr("Error saving draft", "Save failed");
     } finally {
       setSavingId(null);
     }
@@ -197,7 +232,7 @@ export default function OutreachPage() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        alert(err.detail || "Preview failed — package the resume first");
+        flashErr(err.detail || "Preview failed — package the resume first", "Preview failed");
         return;
       }
       const data = await res.json();
@@ -211,11 +246,70 @@ export default function OutreachPage() {
       openMobilePanel("pdf");
     } catch (err) {
       console.error(err);
-      alert("Could not open resume preview");
+      flashErr("Could not open resume preview", "Preview failed");
+    }
+  };
+
+  const handleSaveContact = async (id: string) => {
+    const c = contacts[id];
+    if (!c) return;
+    try {
+      setContacts((prev) => ({
+        ...prev,
+        [id]: { ...prev[id], saving: true },
+      }));
+      const res = await fetch(`/api/v1/messages/${id}/contact`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: c.name || null,
+          email: c.email || null,
+          linkedin_url: c.linkedin || null,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        flashErr(err.detail || "Failed to save contact", "Contact save failed");
+        return;
+      }
+      const updated: Message = await res.json();
+      setMessages((prev) => prev.map((m) => (m.id === id ? updated : m)));
+      setContacts((prev) => ({
+        ...prev,
+        [id]: {
+          name: updated.recruiter_name || "",
+          email: updated.recruiter_email || "",
+          linkedin: updated.recruiter_linkedin || "",
+          dirty: false,
+          saving: false,
+        },
+      }));
+    } catch (err) {
+      console.error(err);
+      flashErr("Error saving contact", "Contact save failed");
+    } finally {
+      setContacts((prev) => ({
+        ...prev,
+        [id]: { ...prev[id], saving: false },
+      }));
     }
   };
 
   const handleAutoSend = async (id: string, force = false) => {
+    const msg = messages.find((m) => m.id === id);
+    const c = contacts[id];
+    if (c?.dirty) {
+      await handleSaveContact(id);
+    }
+    const email = (c?.email || msg?.recruiter_email || "").trim();
+    const linkedin = (c?.linkedin || msg?.recruiter_linkedin || "").trim();
+    if (!email && !linkedin) {
+      flash("info", "Notice", "Paste a recruiter email or LinkedIn URL first — empty To: gets zero interviews.");
+      return;
+    }
     const d = drafts[id];
     if (d?.dirty) {
       await handleSave(id);
@@ -242,25 +336,93 @@ export default function OutreachPage() {
           } else if (!go) {
             await handleAutoSend(id, true);
           }
-        } else if (data.mailto) {
-          hardNavigate(data.mailto);
-          alert(
-            (data.message || "Opened mailto.") +
-              " After you send, click Mark sent."
-          );
+        } else if (data.contact_linkedin_only && data.linkedin_url) {
+          window.open(data.linkedin_url, "_blank");
+          flash("success", "Done", (data.message || "Opened LinkedIn.") +
+              " After you send a note, click Mark sent.");
+        } else if (!data.smtp_configured) {
+          // Prefer: download resume + open Gmail (avoids missed attach)
+          if (data.resume_download_url && token) {
+            try {
+              const r = await fetch(data.resume_download_url, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (r.ok) {
+                const blob = await r.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = data.resume_filename || "resume.pdf";
+                a.click();
+                URL.revokeObjectURL(url);
+              }
+            } catch {
+              /* continue to Gmail */
+            }
+          }
+          if (data.gmail_url) {
+            window.open(data.gmail_url, "_blank");
+          } else if (data.mailto) {
+            hardNavigate(data.mailto);
+          }
+          flash("success", "Done", (data.message || "Opened Gmail.") +
+              (data.package_folder_hint
+                ? `\n\nPackage folder (host): ${data.package_folder_hint}`
+                : "") +
+              "\nAttach the downloaded PDF, then Mark sent.");
         } else {
-          alert(data.message || "Could not send");
+          flashErr(data.message || "Could not send", "Send failed");
         }
       } else {
         const err = await res.json();
-        alert(err.detail || "Failed to send email");
+        flashErr(err.detail || "Failed to send email", "Send failed");
       }
     } catch (err) {
       console.error(err);
-      alert("Error sending email");
+      flashErr("Error sending email", "Send failed");
     } finally {
       setSendingId(null);
     }
+  };
+
+  /** Browsers cannot auto-attach to Gmail — download PDF then open compose. */
+  const downloadPdfAndOpenGmail = async (
+    msg: Message,
+    resumeAtt: Attachment | undefined
+  ) => {
+    const c = contacts[msg.id];
+    const email = (c?.email || msg.recruiter_email || "").trim();
+    if (!email) {
+      flash("info", "Email required", "Paste a recruiter email in the contact fields before sending.");
+      return;
+    }
+    if (resumeAtt?.download_url && token) {
+      try {
+        const r = await fetch(resumeAtt.download_url, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (r.ok) {
+          const blob = await r.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = resumeAtt.name || "resume.pdf";
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      } catch {
+        /* still open Gmail */
+      }
+    }
+    const d = drafts[msg.id];
+    const subject = d?.subject || msg.subject_line || "";
+    const body = d?.body || msg.body || msg.content || "";
+    const gmail =
+      "https://mail.google.com/mail/?view=cm&fs=1" +
+      `&to=${encodeURIComponent(email)}` +
+      `&su=${encodeURIComponent(subject)}` +
+      `&body=${encodeURIComponent(body)}`;
+    window.open(gmail, "_blank");
   };
 
   const handleMarkSent = async (id: string) => {
@@ -278,7 +440,7 @@ export default function OutreachPage() {
         prev.map((m) => (m.id === id ? { ...m, status: "Sent" } : m))
       );
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Mark sent failed");
+      flashErr(err instanceof Error ? err.message : "Mark sent failed", "Mark sent failed");
     } finally {
       setSendingId(null);
     }
@@ -290,11 +452,19 @@ export default function OutreachPage() {
         <div>
           <h1 className="text-4xl font-bold tracking-tight mb-2">Outreach Queue</h1>
           <p className="text-muted-foreground text-lg">
-            Human-sounding drafts from your JD + resume. Edit subject &amp; body, preview
-            the tailored resume, then send.
+            Paste recruiter email or LinkedIn, edit the draft, then send. Empty To: gets
+            zero interviews.
           </p>
         </div>
       </div>
+
+      
+      {pageMessage && (
+        <PageMessageBanner
+          message={pageMessage}
+          onDismiss={() => setPageMessage(null)}
+        />
+      )}
 
       {loading ? (
         <div className="space-y-6">
@@ -335,6 +505,15 @@ export default function OutreachPage() {
         <div className="space-y-6">
           {messages.map((msg) => {
             const d = drafts[msg.id] || { subject: "", body: "", dirty: false };
+            const c = contacts[msg.id] || {
+              name: msg.recruiter_name || "",
+              email: msg.recruiter_email || "",
+              linkedin: msg.recruiter_linkedin || "",
+              dirty: false,
+            };
+            const hasContact = Boolean(
+              (c.email || "").trim() || (c.linkedin || "").trim()
+            );
             const resumeAtt =
               msg.attachments?.find((a) => a.kind === "resume_pdf" && a.exists) ||
               msg.attachments?.find((a) => a.kind === "resume_docx" && a.exists);
@@ -348,23 +527,113 @@ export default function OutreachPage() {
                 className="rounded-xl border bg-card shadow-sm overflow-hidden flex flex-col md:flex-row"
               >
                 <div className="bg-muted/30 p-6 md:w-1/3 border-b md:border-b-0 md:border-r flex flex-col gap-6">
-                  <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">
-                      Recipient
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                      Recipient (required)
                     </h4>
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
-                        {(msg.recruiter_name || "H")[0]}
-                      </div>
-                      <div>
-                        <p className="font-medium text-foreground">
-                          {msg.recruiter_name || "Hiring Manager"}
+                    {!(
+                      (contacts[msg.id]?.email || msg.recruiter_email || "").trim() ||
+                      (contacts[msg.id]?.linkedin || msg.recruiter_linkedin || "").trim()
+                    ) &&
+                      msg.status !== "Sent" && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400">
+                          No email from discovery — paste LinkedIn or email before send.
                         </p>
-                        <p className="text-sm text-muted-foreground">
-                          {msg.recruiter_email || "No email found"}
-                        </p>
-                      </div>
-                    </div>
+                      )}
+                    <label className="block space-y-1">
+                      <span className="text-[11px] text-muted-foreground">Name</span>
+                      <input
+                        value={contacts[msg.id]?.name ?? msg.recruiter_name ?? ""}
+                        disabled={msg.status === "Sent"}
+                        onChange={(e) =>
+                          setContacts((prev) => ({
+                            ...prev,
+                            [msg.id]: {
+                              name: e.target.value,
+                              email: prev[msg.id]?.email ?? msg.recruiter_email ?? "",
+                              linkedin:
+                                prev[msg.id]?.linkedin ?? msg.recruiter_linkedin ?? "",
+                              dirty: true,
+                            },
+                          }))
+                        }
+                        className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm"
+                        placeholder="Hiring manager name"
+                      />
+                    </label>
+                    <label className="block space-y-1">
+                      <span className="text-[11px] text-muted-foreground">Email</span>
+                      <input
+                        type="email"
+                        value={contacts[msg.id]?.email ?? msg.recruiter_email ?? ""}
+                        disabled={msg.status === "Sent"}
+                        onChange={(e) =>
+                          setContacts((prev) => ({
+                            ...prev,
+                            [msg.id]: {
+                              name: prev[msg.id]?.name ?? msg.recruiter_name ?? "",
+                              email: e.target.value,
+                              linkedin:
+                                prev[msg.id]?.linkedin ?? msg.recruiter_linkedin ?? "",
+                              dirty: true,
+                            },
+                          }))
+                        }
+                        className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm"
+                        placeholder="recruiter@company.com"
+                      />
+                    </label>
+                    <label className="block space-y-1">
+                      <span className="text-[11px] text-muted-foreground">
+                        LinkedIn URL
+                      </span>
+                      <input
+                        value={
+                          contacts[msg.id]?.linkedin ?? msg.recruiter_linkedin ?? ""
+                        }
+                        disabled={msg.status === "Sent"}
+                        onChange={(e) =>
+                          setContacts((prev) => ({
+                            ...prev,
+                            [msg.id]: {
+                              name: prev[msg.id]?.name ?? msg.recruiter_name ?? "",
+                              email: prev[msg.id]?.email ?? msg.recruiter_email ?? "",
+                              linkedin: e.target.value,
+                              dirty: true,
+                            },
+                          }))
+                        }
+                        className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm"
+                        placeholder="https://linkedin.com/in/…"
+                      />
+                    </label>
+                    {msg.status !== "Sent" && (
+                      <button
+                        type="button"
+                        onClick={() => handleSaveContact(msg.id)}
+                        disabled={
+                          contacts[msg.id]?.saving || !contacts[msg.id]?.dirty
+                        }
+                        className="inline-flex items-center justify-center rounded-md text-xs font-medium border hover:bg-muted h-8 px-3 gap-1.5 disabled:opacity-50 w-full"
+                      >
+                        <Save className="h-3.5 w-3.5" />
+                        {contacts[msg.id]?.saving
+                          ? "Saving…"
+                          : contacts[msg.id]?.dirty
+                            ? "Save contact"
+                            : "Contact saved"}
+                      </button>
+                    )}
+                    {msg.recruiter_linkedin && (
+                      <a
+                        href={msg.recruiter_linkedin}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-primary hover:underline"
+                      >
+                        Open LinkedIn profile
+                      </a>
+                    )}
                   </div>
 
                   <div>
@@ -389,9 +658,39 @@ export default function OutreachPage() {
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {msg.package_hint}
+                      {" "}
+                      {msg.smtp_configured
+                        ? "SMTP on — Send attaches the tailored resume PDF."
+                        : "Gmail cannot auto-attach — download PDF then paperclip, or set SMTP_*."}
                     </p>
+                    {(msg.package_folder_hint || msg.package_folder) && (
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <code className="rounded bg-muted px-2 py-1 break-all">
+                          {msg.package_folder_hint || msg.package_folder}
+                        </code>
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 rounded-md border px-2 py-1 hover:bg-muted"
+                          onClick={() => {
+                            const path =
+                              msg.package_folder_hint || msg.package_folder || "";
+                            void navigator.clipboard.writeText(path);
+                            flash("success", "Done", `Copied: ${path}\nOpen that folder in Explorer/Finder to grab files.`);
+                          }}
+                        >
+                          <Copy className="h-3.5 w-3.5" /> Copy package folder
+                        </button>
+                      </div>
+                    )}
                     {resumeAtt ? (
                       <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void downloadPdfAndOpenGmail(msg, resumeAtt)}
+                          className="inline-flex items-center gap-1 rounded-md bg-primary text-primary-foreground px-2.5 py-1.5 text-xs"
+                        >
+                          <Mail className="h-3.5 w-3.5" /> Download PDF &amp; open Gmail
+                        </button>
                         <button
                           type="button"
                           onClick={() => previewAttachment(resumeAtt)}
@@ -507,7 +806,16 @@ export default function OutreachPage() {
                       </button>
                       {msg.message_type === "Email" && (
                         <button
-                          onClick={() => openInGmail(msg)}
+                          onClick={() => {
+                            if (!(c.email || "").trim()) {
+                              flash("info", "Email required", "Paste an email first — Gmail needs a To: address.");
+                              return;
+                            }
+                            openInGmail({
+                              ...msg,
+                              recruiter_email: c.email || msg.recruiter_email,
+                            });
+                          }}
                           className="inline-flex items-center justify-center rounded-md text-xs font-medium bg-primary text-primary-foreground shadow hover:bg-primary/90 h-8 px-3 gap-1.5"
                         >
                           <Mail className="h-3.5 w-3.5" /> Open in Gmail
@@ -562,7 +870,12 @@ export default function OutreachPage() {
                     {msg.status !== "Sent" && (
                       <button
                         onClick={() => handleAutoSend(msg.id)}
-                        disabled={sendingId === msg.id}
+                        disabled={sendingId === msg.id || !hasContact}
+                        title={
+                          hasContact
+                            ? undefined
+                            : "Paste email or LinkedIn before send"
+                        }
                         className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-green-600 hover:bg-green-700 text-white h-9 px-4 gap-2 disabled:opacity-50"
                       >
                         {sendingId === msg.id ? (
@@ -570,7 +883,7 @@ export default function OutreachPage() {
                         ) : (
                           <Send className="h-4 w-4" />
                         )}
-                        {sendingId === msg.id ? "Sending..." : "Send / mailto"}
+                        {sendingId === msg.id ? "Sending..." : msg.smtp_configured ? "Send with resume" : "Send / Gmail"}
                       </button>
                     )}
                     <button

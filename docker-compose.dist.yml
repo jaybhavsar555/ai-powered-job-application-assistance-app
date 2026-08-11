@@ -1,0 +1,130 @@
+# Career OS — distributable full stack (runs on THE USER's machine)
+#
+# End users (no Node/Python required):
+#   1. Install Docker Desktop
+#   2. cp .env.dist.example .env.dist   # edit SECRET_KEY + passwords
+#   3. ./scripts/dist-setup.sh         # or scripts/dist-setup.ps1 on Windows
+#   4. Open http://localhost:3000
+#
+# Your laptop is never involved — each person runs their own containers.
+#
+# Prefer pre-built images (Docker Hub / GHCR) when set:
+#   API_IMAGE=youruser/career-os-api:1.0.0
+#   WEB_IMAGE=youruser/career-os-web:1.0.0
+# Otherwise Compose builds from ./backend and ./frontend.
+
+name: career-os
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-career}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.dist}
+      POSTGRES_DB: ${POSTGRES_DB:-aijobdb}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-career} -d ${POSTGRES_DB:-aijobdb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.dist}"]
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  # Model weights are NOT in the image — setup script runs: ollama pull …
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    restart: unless-stopped
+
+  api:
+    image: ${API_IMAGE:-career-os-api:local}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-career}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-aijobdb}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      OLLAMA_BASE_URL: http://ollama:11434/v1
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      LLM_FORCE_MOCK: "false"
+      LLM_ALLOW_MOCK: "false"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+      TOKENHARBOR_API_KEY: ${TOKENHARBOR_API_KEY:-}
+      TOKENHARBOR_BASE_URL: ${TOKENHARBOR_BASE_URL:-https://tokenharbor.ai/v1}
+      TOKENHARBOR_MODEL: ${TOKENHARBOR_MODEL:-kimi-k3:free}
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      EMBEDDING_DIMS: ${EMBEDDING_DIMS:-768}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY (>=32 chars) in .env.dist}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      ALLOW_DEMO_AUTH: ${ALLOW_DEMO_AUTH:-false}
+      SEED_DEV_USERS: ${SEED_DEV_USERS:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      CHECKPOINT_BACKEND: postgres
+      RESUME_SOURCE_DIR: /data/resumes
+      APPLICATION_PACKAGE_DIR: /data/packages
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      HUNTER_API_KEY: ${HUNTER_API_KEY:-}
+      JOB_DISCOVERY_SOURCES: ${JOB_DISCOVERY_SOURCES:-vault_portals,remotive,remoteok,arbeitnow}
+      JOB_DISCOVERY_PER_SOURCE: ${JOB_DISCOVERY_PER_SOURCE:-3}
+      JOB_DISCOVERY_VAULT_LIMIT: ${JOB_DISCOVERY_VAULT_LIMIT:-12}
+      JOB_DISCOVERY_MAX_RESULTS: ${JOB_DISCOVERY_MAX_RESULTS:-15}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-300}
+    volumes:
+      - ${RESUME_HOST_DIR:-./data/resumes}:/data/resumes
+      - ${PACKAGE_HOST_DIR:-./data/packages}:/data/packages
+    ports:
+      - "${API_PORT:-8001}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      qdrant:
+        condition: service_started
+      ollama:
+        condition: service_started
+    restart: unless-stopped
+
+  web:
+    image: ${WEB_IMAGE:-career-os-web:local}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001/api/v1}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  ollama_data:

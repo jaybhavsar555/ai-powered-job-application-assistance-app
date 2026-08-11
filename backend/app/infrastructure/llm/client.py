@@ -18,9 +18,12 @@ from openai import AsyncOpenAI
 from app.infrastructure.llm.runtime import get_llm_runtime
 from app.infrastructure.llm.telemetry import (
     record_llm_call,
+    record_llm_failure,
     record_llm_success,
     record_mock_fallback,
 )
+
+_ollama_session_warmed = False
 
 
 @lru_cache()
@@ -28,13 +31,15 @@ def get_raw_openai_client() -> Optional[AsyncOpenAI]:
     cfg = get_llm_runtime()
     if cfg.force_mock:
         return None
-    if cfg.provider == "openai" and not cfg.api_key:
+    if cfg.provider in ("openai", "tokenharbor") and not cfg.api_key:
         return None
 
     kwargs: dict[str, Any] = {
         "api_key": cfg.api_key or "ollama",
         # Read timeout must cover full local generation; connect stays snappy.
         "timeout": httpx.Timeout(cfg.timeout_seconds, connect=10.0),
+        # Fail fast on 502 so Token Harbor can switch to the alt free model.
+        "max_retries": 0,
     }
     if cfg.base_url:
         kwargs["base_url"] = cfg.base_url
@@ -108,31 +113,58 @@ async def warm_ollama_model(cfg=None) -> dict[str, Any]:
         return {"warmed": False, "error": str(exc), "model": cfg.model}
 
 
-async def structured_generate(response_model, messages, *, fallback, max_tokens: int | None = None):
+async def structured_generate(
+    response_model,
+    messages,
+    *,
+    fallback=None,
+    max_tokens: int | None = None,
+    timeout: float | None = None,
+):
     """
     Run Instructor structured generation.
-    - If force_mock is set (intentional dev/test mode), uses fallback.
-    - If LLM provider is not configured, raises RuntimeError.
-    - If LLM call fails (OpenAI + Ollama both fail), raises RuntimeError.
-    No silent mock fallbacks in production paths.
+
+    - Explicit mock mode (provider=mock / LLM_FORCE_MOCK): uses ``fallback`` only.
+    - Otherwise: real LLM only. Failures raise RuntimeError (no silent fake JSON).
+    - Token Harbor / OpenAI may fall through to local Ollama (real model), then raise.
     """
     cfg = get_llm_runtime()
     record_llm_call()
 
-    # Intentional mock mode (force_mock=true in .env for local dev/tests)
     if cfg.force_mock:
+        if fallback is None:
+            raise RuntimeError(
+                "Mock LLM mode is on (LLM_FORCE_MOCK or provider=mock) but this "
+                "call has no fallback factory. Turn mock off or fix the agent."
+            )
         record_mock_fallback(reason="force_mock", provider=cfg.provider, model=cfg.model)
+        print(
+            f"[LLM] MOCK MODE — returning synthetic data "
+            f"(provider={cfg.provider} model={cfg.model}). "
+            "Switch to Ollama/OpenAI for real output."
+        )
         return fallback() if callable(fallback) else fallback
 
     client = get_instructor_client()
     if client is None:
         raise RuntimeError(
-            f"LLM provider '{cfg.provider}' is not configured or has no API key. "
-            "Check your .env (LLM_PROVIDER, OPENAI_API_KEY, or OLLAMA_BASE_URL)."
+            f"LLM provider '{cfg.provider}' is not configured. "
+            "Set OPENAI_API_KEY or run Ollama and choose provider=ollama "
+            "(Canvas LLM switch). Mock/fake agent output is disabled."
         )
 
+    global _ollama_session_warmed
+    if cfg.provider == "ollama" and not _ollama_session_warmed:
+        warm = await warm_ollama_model(cfg)
+        _ollama_session_warmed = bool(warm.get("warmed"))
+        if not _ollama_session_warmed:
+            print(
+                f"[LLM] ollama warm skipped/failed — first call may hit "
+                f"timeout ({cfg.timeout_seconds}s): {warm}"
+            )
+
     model = cfg.model
-    timeout = cfg.timeout_seconds
+    call_timeout = float(timeout) if timeout is not None else float(cfg.timeout_seconds)
     token_budget = max_tokens if max_tokens is not None else cfg.max_tokens
     if cfg.provider == "ollama":
         token_budget = min(token_budget, cfg.max_tokens)
@@ -167,76 +199,84 @@ async def structured_generate(response_model, messages, *, fallback, max_tokens:
 
     last_error: Exception | None = None
 
-    # Primary LLM call
     try:
         print(
             f"[LLM] provider={cfg.provider} model={model} "
-            f"max_tokens={token_budget} timeout={timeout}s"
+            f"max_tokens={token_budget} timeout={call_timeout}s"
         )
         result = await asyncio.wait_for(
             client.chat.completions.create(**create_kwargs),
-            timeout=timeout,
+            timeout=call_timeout,
         )
         record_llm_success()
         return result
     except Exception as exc:
         last_error = exc
+        detail = _friendly_llm_error(exc, timeout=call_timeout)
         print(
             f"[LLM] provider={cfg.provider} model={model} failed "
-            f"({type(exc).__name__}: {exc})"
+            f"({type(exc).__name__}: {detail})"
         )
 
-    # Ollama fallback (only when primary provider is OpenAI)
-    if cfg.provider == "openai":
+    # Token Harbor peak-demand / model blip → try another free chat model (real, not mock)
+    if cfg.provider == "tokenharbor" and last_error is not None:
+        alt = (
+            "deepseek-v4-flash:free"
+            if "kimi" in (model or "").lower()
+            else "kimi-k3:free"
+        )
+        if alt != model:
+            try:
+                print(f"[LLM] Token Harbor retry with alternate free model={alt}")
+                alt_kwargs = {**create_kwargs, "model": alt}
+                result = await asyncio.wait_for(
+                    client.chat.completions.create(**alt_kwargs),
+                    timeout=min(call_timeout, 60.0),
+                )
+                record_llm_success()
+                return result
+            except Exception as alt_exc:
+                print(f"[LLM] Token Harbor alt model also failed: {alt_exc}")
+                last_error = alt_exc
+
+    # Local Ollama when cloud providers fail (OpenAI or Token Harbor)
+    if cfg.provider in ("openai", "tokenharbor"):
         try:
             from app.core.config import get_settings
-            settings = get_settings()
 
+            settings = get_settings()
             ollama_client = AsyncOpenAI(
                 api_key="ollama",
                 base_url=settings.OLLAMA_BASE_URL,
                 timeout=httpx.Timeout(settings.OLLAMA_TIMEOUT_SECONDS, connect=10.0),
+                max_retries=0,
             )
-            ollama_inst = instructor.from_openai(ollama_client, mode=instructor.Mode.JSON)
-
+            ollama_inst = instructor.from_openai(
+                ollama_client, mode=instructor.Mode.JSON
+            )
             ollama_model = settings.OLLAMA_MODEL
-            speed_hint = (
-                "Respond with compact JSON only. Prefer short strings and small arrays. "
-                f"Stay well under {token_budget} tokens."
+            ollama_budget = min(token_budget, int(settings.OLLAMA_MAX_TOKENS or 400))
+            print(
+                f"[LLM] {cfg.provider} failed — trying real Ollama fallback "
+                f"model={ollama_model} (not mock)"
             )
-            call_messages_ollama = list(messages)
-            if call_messages_ollama:
-                first = call_messages_ollama[0]
-                if first.get("role") == "system":
-                    call_messages_ollama[0] = {
-                        **first,
-                        "content": f"{first.get('content', '')}\n\n{speed_hint}".strip(),
-                    }
-                else:
-                    call_messages_ollama.insert(0, {"role": "system", "content": speed_hint})
-
             ollama_kwargs: dict[str, Any] = {
                 "model": ollama_model,
                 "response_model": response_model,
-                "messages": call_messages_ollama,
+                "messages": call_messages,
                 "max_retries": 0,
-                "max_tokens": token_budget,
+                "max_tokens": ollama_budget,
                 "temperature": 0.2,
+                "extra_body": {
+                    "options": {
+                        "num_predict": ollama_budget,
+                        "num_ctx": min(settings.OLLAMA_NUM_CTX, 2048),
+                    }
+                },
             }
-            extra = {
-                "options": {
-                    "num_predict": token_budget,
-                    "num_ctx": min(settings.OLLAMA_NUM_CTX, 2048),
-                }
-            }
-            if settings.OLLAMA_NUM_THREAD > 0:
-                extra["options"]["num_thread"] = settings.OLLAMA_NUM_THREAD
-            ollama_kwargs["extra_body"] = extra
-
-            print(f"[LLM] fallback provider=ollama model={ollama_model} max_tokens={token_budget}")
             result = await asyncio.wait_for(
                 ollama_inst.chat.completions.create(**ollama_kwargs),
-                timeout=settings.OLLAMA_TIMEOUT_SECONDS,
+                timeout=min(float(settings.OLLAMA_TIMEOUT_SECONDS or 120), 120.0),
             )
             record_llm_success()
             return result
@@ -244,13 +284,54 @@ async def structured_generate(response_model, messages, *, fallback, max_tokens:
             print(f"[LLM] Ollama fallback also failed: {inner_exc}")
             last_error = inner_exc
 
-    # Both providers failed — raise so the API returns a real error, not hallucinated data
-    record_mock_fallback(
+    detail = _friendly_llm_error(last_error, timeout=call_timeout) if last_error else "unknown"
+    record_llm_failure(
         reason=type(last_error).__name__ if last_error else "unknown",
         provider=cfg.provider,
         model=model,
     )
+
+    # Agents that pass fallback= opt into degraded (real template) output when LLM is down.
+    # Not the same as mock mode — logs as degraded, never silent fake success without a fallback.
+    if fallback is not None:
+        print(
+            f"[LLM] degraded — using agent fallback "
+            f"(provider={cfg.provider} model={model}): {detail}"
+        )
+        return fallback() if callable(fallback) else fallback
+
     raise RuntimeError(
-        f"LLM call failed (provider={cfg.provider} model={model}): "
-        f"{type(last_error).__name__}: {last_error}"
+        f"LLM unavailable (provider={cfg.provider} model={model}): {detail}. "
+        "Fix OpenAI billing/key, warm Ollama, or raise OLLAMA_TIMEOUT_SECONDS. "
+        "No fake/mock content was generated."
     )
+
+
+def _friendly_llm_error(exc: Exception | None, *, timeout: float | None = None) -> str:
+    if exc is None:
+        return "unknown error"
+    text = str(exc) or type(exc).__name__
+    low = text.lower()
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) or "timeout" in low:
+        secs = f"{int(timeout)}s" if timeout else "the configured timeout"
+        return (
+            f"Timed out after {secs}. First Ollama call can be slow (model load). "
+            "Retry once, use Canvas → warm/switch Ollama, or set "
+            "OLLAMA_TIMEOUT_SECONDS=180+ in Compose/.env."
+        )
+    if "502" in low or "peak demand" in low or "upstream_error" in low:
+        return (
+            "Token Harbor / upstream is busy (HTTP 502). Retry in a moment, "
+            "or set TOKENHARBOR_MODEL=deepseek-v4-flash:free in backend/.env."
+        )
+    if "insufficient_quota" in low or "no credits" in low or "429" in low:
+        return (
+            "OpenAI account has no credits (HTTP 429). "
+            "Add billing at platform.openai.com or switch to Ollama."
+        )
+    if "connection" in low and "error" in low:
+        return (
+            f"{text} — often a billing/network issue; verify API key and "
+            "try Ollama locally."
+        )
+    return f"{type(exc).__name__}: {text}"

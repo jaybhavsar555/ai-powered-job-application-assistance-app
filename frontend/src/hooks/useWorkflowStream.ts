@@ -48,11 +48,22 @@ export function useWorkflowStream(jobId: string, resume = false, nonce = 0) {
         const data = JSON.parse(event.data) as WorkflowEvent;
         const name = agentKey(data);
 
-        addEvent({
+        let enriched: WorkflowEvent = {
           ...data,
           node: name,
           timestamp: new Date().toISOString(),
-        });
+        };
+
+        if (data.type === 'AGENT_ERROR') {
+          const errMsg =
+            (typeof data.error === 'string' && data.error) ||
+            (typeof data.message === 'string' && data.message) ||
+            ((data.payload as Record<string, unknown> | undefined)?.error as string) ||
+            'Agent failed — check API logs (LLM/scrape may be missing).';
+          enriched = { ...enriched, error: errMsg, message: errMsg };
+        }
+
+        addEvent(enriched);
 
         if (data.type === 'AGENT_STARTED') {
           setActiveNode(name);
@@ -68,6 +79,7 @@ export function useWorkflowStream(jobId: string, resume = false, nonce = 0) {
           });
         } else if (data.type === 'AGENT_ERROR') {
           setNodeTelemetry(name, { status: 'error' });
+          setWorkflowStatus('error');
         } else if (data.type === 'COMPLETED') {
           if (data.final_state) {
             setFinalState(data.final_state);
