@@ -32,6 +32,17 @@ async def get_resume_studio_detail(
     return await service.get_studio_detail(current_user.id, item_id)
 
 
+@router.delete("/studio/{item_id}", status_code=204)
+async def delete_resume_studio_item(
+    item_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a resume version or clear a workflow draft."""
+    service = ResumeStudioService(db)
+    await service.delete_studio_item(current_user.id, item_id)
+
+
 @router.post("/", response_model=ResumeResponse)
 async def create_resume(
     data: ResumeCreate,

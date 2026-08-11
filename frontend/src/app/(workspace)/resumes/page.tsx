@@ -19,6 +19,8 @@ import {
   ChevronDown,
   Library,
   Package,
+  MoreVertical,
+  Trash,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { usePanelStore } from "@/store/panelStore";
@@ -113,9 +115,13 @@ export default function ResumesPage() {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showTailorModal, setShowTailorModal] = useState(false);
+  const [tailorStep, setTailorStep] = useState<1 | 2>(1);
   const [jdText, setJdText] = useState("");
+  const [jobUrl, setJobUrl] = useState("");
   const [isTailoring, setIsTailoring] = useState(false);
   const [selectedBaseResume, setSelectedBaseResume] = useState("");
+  const [proposedSkills, setProposedSkills] = useState<string[]>([]);
+  const [approvedSkills, setApprovedSkills] = useState<string[]>([]);
   const [tailorResult, setTailorResult] = useState<string | null>(null);
   const setPreview = usePanelStore((s) => s.setPreview);
   const closePdf = usePanelStore((s) => s.closePdf);
@@ -125,6 +131,14 @@ export default function ResumesPage() {
   const [tailoredFilter, setTailoredFilter] = useState<TailoredFilter>("all");
   const [libQuery, setLibQuery] = useState("");
   const [libRole, setLibRole] = useState<string>("all");
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+
+  // Close menu on outside click
+  useEffect(() => {
+    const handleClick = () => setMenuOpenId(null);
+    document.addEventListener("click", handleClick);
+    return () => document.removeEventListener("click", handleClick);
+  }, []);
 
   const previewResume = async (name: string) => {
     if (!token) return;
@@ -304,11 +318,44 @@ export default function ResumesPage() {
     }
   };
 
-  const handleTailorResume = async () => {
-    if (!jdText.trim()) {
-      setError("Paste a job description first.");
+  const handleAnalyzeJd = async () => {
+    if (!jdText.trim() && !jobUrl.trim()) {
+      setError("Paste a job description or URL first.");
       return;
     }
+    setIsTailoring(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/v1/workflows/analyze-jd-skills", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(),
+        },
+        body: JSON.stringify({
+          job_description: jdText,
+          job_url: jobUrl,
+          base_resume: selectedBaseResume || baseResumes[0]?.name,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(typeof body.detail === "string" ? body.detail : "Analysis failed");
+      }
+      const data = await res.json();
+      const gap = data.skill_gap || {};
+      const missing = gap.missing_skills || [];
+      setProposedSkills(missing);
+      setApprovedSkills([...missing]);
+      setTailorStep(2);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Analysis failed");
+    } finally {
+      setIsTailoring(false);
+    }
+  };
+
+  const handleGenerateTailored = async () => {
     setIsTailoring(true);
     setError(null);
     setTailorResult(null);
@@ -321,15 +368,15 @@ export default function ResumesPage() {
         },
         body: JSON.stringify({
           job_description: jdText,
+          job_url: jobUrl,
           base_resume: selectedBaseResume || baseResumes[0]?.name,
+          approved_skills: approvedSkills,
         }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(
-          typeof body.detail === "string"
-            ? body.detail
-            : "Tailor failed — no mock score invented"
+          typeof body.detail === "string" ? body.detail : "Tailor failed"
         );
       }
       const data = await res.json();
@@ -337,11 +384,13 @@ export default function ResumesPage() {
       const keywords = (opt.added_keywords || []).join(", ");
       setTailorResult(
         keywords
-          ? `Draft ready. Keywords: ${keywords}. Approve via Canvas/Approvals to save a version.`
+          ? `Draft ready. Keywords added: ${keywords}. Approve via Canvas/Approvals to save a version.`
           : "Draft returned. Approve via Canvas/Approvals to save a version."
       );
       setShowTailorModal(false);
       setJdText("");
+      setJobUrl("");
+      setTailorStep(1);
       setView("tailored");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Tailor failed");
@@ -373,6 +422,45 @@ export default function ResumesPage() {
     }
   };
 
+  const deleteStudioItem = async (id: string, isApproved: boolean) => {
+    if (!confirm(`Are you sure you want to delete this ${isApproved ? "version" : "draft"}?`)) return;
+    try {
+      const res = await fetch(`/api/v1/resumes/studio/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      if (!res.ok) {
+        throw new Error("Failed to delete item");
+      }
+      setItems((prev) => prev.filter((i) => i.id !== id));
+      if (selectedId === id) {
+        setDetail(null);
+        setSelectedId(null);
+        setView("tailored");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+    }
+  };
+
+  const previewTailoredResume = (item: StudioItem) => {
+    if (!item.has_package || !item.package?.files?.resume_pdf) {
+      setError("No PDF package available to preview. Run Canvas/Approvals first.");
+      return;
+    }
+    try {
+      setPreview({
+        title: `${item.company} Resume`,
+        kind: "pdf",
+        fileUrl: `/api/v1/documents/package-download?application_id=${item.application_id}&kind=resume_pdf`,
+        text: null,
+        note: "PDF opens in side panel.",
+      });
+    } catch {
+      setError("Preview failed");
+    }
+  };
+
   return (
     <div className="min-h-full flex flex-col bg-background">
       <input
@@ -398,7 +486,12 @@ export default function ResumesPage() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => setShowTailorModal(true)}
+                onClick={() => {
+                  setTailorStep(1);
+                  setJdText("");
+                  setJobUrl("");
+                  setShowTailorModal(true);
+                }}
                 className="inline-flex items-center gap-2 rounded-md border bg-background h-9 px-3 text-sm font-medium hover:bg-muted"
               >
                 <Wand2 className="h-4 w-4" />
@@ -626,7 +719,6 @@ export default function ResumesPage() {
                       {item.has_package &&
                         Object.entries(item.package?.files || {})
                           .filter(([, ok]) => ok)
-                          .slice(0, 1)
                           .map(([kind]) => (
                             <button
                               key={kind}
@@ -643,6 +735,51 @@ export default function ResumesPage() {
                               {DOWNLOAD_LABELS[kind] || kind}
                             </button>
                           ))}
+                      {item.has_package && (
+                        <button
+                          type="button"
+                          onClick={() => alert("Auto Apply starting! (Chrome Extension API pending)")}
+                          className="inline-flex items-center gap-1 rounded-md bg-emerald-600 text-white px-2.5 py-1.5 text-xs font-medium hover:bg-emerald-700 ml-2"
+                        >
+                          <Sparkles className="h-3.5 w-3.5" /> Apply Now
+                        </button>
+                      )}
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMenuOpenId(menuOpenId === item.id ? null : item.id);
+                          }}
+                          className="p-1.5 rounded-md hover:bg-muted"
+                        >
+                          <MoreVertical className="h-4 w-4" />
+                        </button>
+                        {menuOpenId === item.id && (
+                          <div className="absolute right-0 top-full mt-1 w-32 rounded-md border bg-popover text-popover-foreground shadow-md z-50 overflow-hidden">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                previewTailoredResume(item);
+                                setMenuOpenId(null);
+                              }}
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2"
+                            >
+                              <Eye className="h-4 w-4" /> Preview
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                deleteStudioItem(item.id, item.approved);
+                                setMenuOpenId(null);
+                              }}
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-muted text-destructive flex items-center gap-2"
+                            >
+                              <Trash className="h-4 w-4" /> Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </li>
                 ))}
@@ -937,67 +1074,147 @@ export default function ResumesPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-card border rounded-xl shadow-lg w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b shrink-0">
-              <h3 className="font-semibold">Tailor resume (draft)</h3>
+              <h3 className="font-semibold">
+                {tailorStep === 1 ? "Tailor resume (Step 1/2)" : "Review Skills (Step 2/2)"}
+              </h3>
               <button
                 type="button"
-                onClick={() => setShowTailorModal(false)}
+                onClick={() => {
+                  setShowTailorModal(false);
+                  setTailorStep(1);
+                }}
                 className="p-2 rounded-md hover:bg-muted"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
+            
             <div className="p-4 space-y-4 overflow-y-auto">
-              <p className="text-sm text-muted-foreground">
-                Draft only — save a version via Canvas / Approvals. No fake ATS score.
-              </p>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Master template</label>
-                <select
-                  value={selectedBaseResume}
-                  onChange={(e) => setSelectedBaseResume(e.target.value)}
-                  className="w-full p-3 rounded-md border bg-background text-sm"
-                >
-                  {baseResumes.map((r) => (
-                    <option key={r.name} value={r.name}>
-                      [{roleLabel(r.role_hint)}] {shortName(r.name)}
-                    </option>
-                  ))}
-                  {baseResumes.length === 0 && (
-                    <option value="">No templates found</option>
+              {tailorStep === 1 ? (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Draft only — save a version via Canvas / Approvals. We will scrape the JD and analyze missing skills first.
+                  </p>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Master template</label>
+                    <select
+                      value={selectedBaseResume}
+                      onChange={(e) => setSelectedBaseResume(e.target.value)}
+                      className="w-full p-3 rounded-md border bg-background text-sm"
+                    >
+                      {baseResumes.map((r) => (
+                        <option key={r.name} value={r.name}>
+                          [{roleLabel(r.role_hint)}] {shortName(r.name)}
+                        </option>
+                      ))}
+                      {baseResumes.length === 0 && (
+                        <option value="">No templates found</option>
+                      )}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Job URL (Optional)</label>
+                    <input
+                      type="url"
+                      value={jobUrl}
+                      onChange={(e) => setJobUrl(e.target.value)}
+                      className="w-full p-3 rounded-md border bg-background text-sm"
+                      placeholder="https://..."
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Job description (Optional if URL provided)</label>
+                    <textarea
+                      value={jdText}
+                      onChange={(e) => setJdText(e.target.value)}
+                      className="w-full h-32 p-3 rounded-md border bg-background text-sm font-mono resize-none"
+                      placeholder="Paste the JD…"
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    The AI found the following skills missing from your base resume. Check only the ones you actually have experience with. We will weave them into your generated resume.
+                  </p>
+                  {proposedSkills.length === 0 ? (
+                    <div className="rounded-lg border bg-muted/50 p-4 text-center">
+                      <CheckCircle className="mx-auto h-8 w-8 text-emerald-500 mb-2" />
+                      <p className="font-medium text-sm">Your resume already covers the required skills!</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 mt-4">
+                      {proposedSkills.map((skill) => (
+                        <label key={skill} className="flex items-center gap-3 p-3 rounded-lg border bg-card cursor-pointer hover:bg-muted/50">
+                          <input 
+                            type="checkbox"
+                            checked={approvedSkills.includes(skill)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setApprovedSkills([...approvedSkills, skill]);
+                              } else {
+                                setApprovedSkills(approvedSkills.filter(s => s !== skill));
+                              }
+                            }}
+                            className="h-4 w-4 rounded border-gray-300 text-primary"
+                          />
+                          <span className="text-sm font-medium">{skill}</span>
+                        </label>
+                      ))}
+                    </div>
                   )}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Job description</label>
-                <textarea
-                  value={jdText}
-                  onChange={(e) => setJdText(e.target.value)}
-                  className="w-full h-40 p-3 rounded-md border bg-background text-sm font-mono resize-none"
-                  placeholder="Paste the JD…"
-                />
-              </div>
+                </>
+              )}
             </div>
+
             <div className="p-4 border-t flex justify-end gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => setShowTailorModal(false)}
-                className="px-4 py-2 rounded-md text-sm hover:bg-muted"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleTailorResume}
-                disabled={isTailoring || baseResumes.length === 0}
-                className="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground disabled:opacity-50 inline-flex items-center gap-2"
-              >
-                {isTailoring ? (
-                  <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <Sparkles className="h-4 w-4" />
-                )}
-                Generate draft
-              </button>
+              {tailorStep === 1 ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowTailorModal(false)}
+                    className="px-4 py-2 rounded-md text-sm hover:bg-muted"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAnalyzeJd}
+                    disabled={isTailoring || baseResumes.length === 0}
+                    className="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground disabled:opacity-50 inline-flex items-center gap-2"
+                  >
+                    {isTailoring ? (
+                      <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4" />
+                    )}
+                    Analyze JD
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setTailorStep(1)}
+                    className="px-4 py-2 rounded-md text-sm hover:bg-muted"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGenerateTailored}
+                    disabled={isTailoring}
+                    className="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground disabled:opacity-50 inline-flex items-center gap-2"
+                  >
+                    {isTailoring ? (
+                      <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <Wand2 className="h-4 w-4" />
+                    )}
+                    Generate ATS Resume
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

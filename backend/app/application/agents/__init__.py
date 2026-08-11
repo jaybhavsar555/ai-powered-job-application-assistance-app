@@ -12,5 +12,13 @@ from .resume_optimizer import ResumeOptimizerAgent
 from .cover_letter_agent import CoverLetterAgent
 from .recruiter_discovery_agent import RecruiterDiscoveryAgent
 from .outreach_draft_agent import OutreachDraftAgent
+from .job_discovery_agent import JobDiscoveryAgent
+from .skill_gap_agent import SkillGapAgent
 
-__all__ = ["OSAgent", "agent_registry"]
+__all__ = [
+    "CoverLetterAgent", 
+    "ResumeOptimizerAgent", 
+    "JobDiscoveryAgent", 
+    "RecruiterDiscoveryAgent",
+    "SkillGapAgent"
+]

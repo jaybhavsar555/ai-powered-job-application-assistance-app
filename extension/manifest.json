@@ -1,16 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Career OS Autofill",
-  "version": "0.1.0",
-  "description": "Fill-only autofill for Greenhouse, Lever, and Workday. You always click Submit.",
-  "permissions": ["storage", "activeTab"],
+  "version": "1.0.0",
+  "description": "Universal autofill for all job boards. You click Submit.",
+  "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": [
     "http://localhost:8001/*",
-    "http://127.0.0.1:8001/*",
-    "https://boards.greenhouse.io/*",
-    "https://job-boards.greenhouse.io/*",
-    "https://jobs.lever.co/*",
-    "https://*.myworkdayjobs.com/*"
+    "http://127.0.0.1:8001/*"
   ],
   "action": {
     "default_title": "Career OS Autofill",
@@ -18,18 +14,5 @@
   },
   "background": {
     "service_worker": "background.js"
-  },
-  "content_scripts": [
-    {
-      "matches": [
-        "https://boards.greenhouse.io/*",
-        "https://job-boards.greenhouse.io/*",
-        "https://jobs.lever.co/*",
-        "https://*.myworkdayjobs.com/*"
-      ],
-      "js": ["content/autofill.js"],
-      "css": ["content/autofill.css"],
-      "run_at": "document_idle"
-    }
-  ]
+  }
 }

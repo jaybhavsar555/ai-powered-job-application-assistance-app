@@ -362,3 +362,33 @@ class ResumeStudioService:
         if not app:
             raise HTTPException(status_code=404, detail="Application not found")
         return app
+
+    async def delete_studio_item(self, user_id: UUID, item_id: str) -> None:
+        if item_id.startswith("app-"):
+            try:
+                app_uuid = UUID(item_id[4:])
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Invalid studio item id") from exc
+            app = await self._get_app(user_id, app_uuid)
+            state = dict(app.workflow_state or {})
+            if "tailored_resume" in state:
+                del state["tailored_resume"]
+            if "apply_package" in state:
+                del state["apply_package"]
+            app.workflow_state = state
+            await self.db.commit()
+        else:
+            try:
+                ver_uuid = UUID(item_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Invalid studio item id") from exc
+            result = await self.db.execute(
+                select(DBResumeVersion)
+                .where(DBResumeVersion.id == ver_uuid)
+                .options(selectinload(DBResumeVersion.application))
+            )
+            version = result.scalars().first()
+            if not version or not version.application or version.application.user_id != user_id:
+                raise HTTPException(status_code=404, detail="Resume version not found")
+            await self.db.delete(version)
+            await self.db.commit()

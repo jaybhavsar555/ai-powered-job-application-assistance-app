@@ -92,7 +92,7 @@ document.getElementById("save").addEventListener("click", async () => {
   await savePrefs({ apiBase, token, autoConsent, email });
   setStatus(
     autoConsent
-      ? "Saved. Auto Apply consent ON (allowlisted ATS only)."
+      ? "Saved. Auto Apply consent ON."
       : "Saved. Review mode — you always click Submit.",
     true
   );
@@ -121,12 +121,28 @@ async function fillActiveTab(autoSubmit) {
     setStatus("No active tab", false);
     return;
   }
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      files: ["content/autofill.js"],
+    });
+    try {
+      await chrome.scripting.insertCSS({
+        target: { tabId: tab.id, allFrames: true },
+        files: ["content/autofill.css"],
+      });
+    } catch (_) {}
+  } catch (err) {
+    setStatus("Cannot access this page (Chrome restricted).", false);
+    return;
+  }
+
   chrome.tabs.sendMessage(
     tab.id,
     { type: "CAREER_OS_FILL", autoSubmit: !!autoSubmit },
     (res) => {
       if (chrome.runtime.lastError) {
-        setStatus("Open Greenhouse / Lever / Workday apply page first.", false);
+        setStatus("Failed to communicate with page.", false);
         return;
       }
       if (!res?.ok) {

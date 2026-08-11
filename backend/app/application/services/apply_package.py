@@ -208,7 +208,7 @@ class ApplyPackageService:
         resume_docx = self.docs.generate_resume_docx(
             user_name, contact, summary, bullets, skills=keywords, base_excerpt=resume_text[:3500]
         )
-        resume_pdf = self.docs.generate_resume_pdf(
+        resume_pdf, resume_tex = self.docs.generate_resume_pdf(
             user_name, contact, summary, bullets, skills=keywords, base_excerpt=resume_text[:3500]
         )
         cover_docx = self.docs.generate_cover_letter_docx(user_name, cover_text)
@@ -216,6 +216,11 @@ class ApplyPackageService:
 
         paths["resume_docx"].write_bytes(resume_docx.getvalue())
         paths["resume_pdf"].write_bytes(resume_pdf.getvalue())
+        
+        if resume_tex:
+            paths["resume_tex"] = package_dir / f"{stem}_Resume.tex"
+            paths["resume_tex"].write_text(resume_tex, encoding="utf-8")
+            
         paths["cover_docx"].write_bytes(cover_docx.getvalue())
         paths["cover_pdf"].write_bytes(cover_pdf.getvalue())
 

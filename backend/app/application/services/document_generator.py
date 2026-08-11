@@ -83,8 +83,8 @@ class DocumentGenerator:
         bullets: list[str],
         skills: Optional[list[str]] = None,
         base_excerpt: Optional[str] = None,
-    ) -> io.BytesIO:
-        """Prefer LaTeX (ATS-friendly single-column PDF); fall back to ReportLab."""
+    ) -> tuple[io.BytesIO, Optional[str]]:
+        """Prefer LaTeX (ATS-friendly single-column PDF); fall back to ReportLab. Returns (pdf_stream, latex_str)"""
         try:
             return self._generate_resume_pdf_latex(
                 user_name, contact_info, summary, bullets, skills, base_excerpt
@@ -93,7 +93,7 @@ class DocumentGenerator:
             print(f"[DocumentGenerator] LaTeX resume PDF failed ({exc}); using ReportLab fallback")
             return self._generate_resume_pdf_reportlab(
                 user_name, contact_info, summary, bullets, skills, base_excerpt
-            )
+            ), None
 
     def _generate_resume_pdf_latex(
         self,
@@ -103,7 +103,7 @@ class DocumentGenerator:
         bullets: list[str],
         skills: Optional[list[str]] = None,
         base_excerpt: Optional[str] = None,
-    ) -> io.BytesIO:
+    ) -> tuple[io.BytesIO, str]:
         import os
         import shutil
         import subprocess
@@ -160,7 +160,7 @@ class DocumentGenerator:
 
         stream = io.BytesIO(pdf_data)
         stream.seek(0)
-        return stream
+        return stream, tex_content
 
     def _generate_resume_pdf_reportlab(
         self,

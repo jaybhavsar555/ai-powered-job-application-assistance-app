@@ -91,9 +91,49 @@ async def get_workflow_checkpoint(
 
 from pydantic import BaseModel
 
+class AnalyzeJDSkillsRequest(BaseModel):
+    job_description: str
+    job_url: Optional[str] = None
+    base_resume: str
+
+@router.post("/analyze-jd-skills")
+async def analyze_jd_skills(
+    request: AnalyzeJDSkillsRequest,
+    current_user: User = Depends(get_current_user)
+):
+    from app.application.agents.skill_gap_agent import SkillGapAgent
+    from app.infrastructure.resume_library import extract_text
+    from app.infrastructure.scraping import scrape_job_page
+    from pathlib import Path
+
+    source_dir = Path(settings.RESUME_SOURCE_DIR)
+    file_path = source_dir / request.base_resume
+    
+    resume_text = ""
+    if file_path.exists():
+        resume_text = extract_text(file_path)
+
+    job_text = request.job_description
+    if request.job_url:
+        scraped = await scrape_job_page(request.job_url)
+        if scraped.text:
+            job_text = scraped.text + "\n" + job_text
+
+    agent = SkillGapAgent()
+    gap = await agent.run(
+        {
+            "resume_json": resume_text[:12000],
+            "job_description": job_text[:12000],
+        }
+    )
+    
+    return {"status": "ok", "skill_gap": gap.get("skill_gap", {})}
+
 class TailorResumeRequest(BaseModel):
     job_description: str
+    job_url: Optional[str] = None
     base_resume: str
+    approved_skills: Optional[list[str]] = None
 
 @router.post("/tailor-resume")
 async def tailor_resume_manual(
@@ -102,25 +142,33 @@ async def tailor_resume_manual(
 ):
     from app.application.agents.resume_optimizer import ResumeOptimizerAgent
     from app.infrastructure.resume_library import extract_text, missing_skills_from_job
+    from app.infrastructure.scraping import scrape_job_page
     from pathlib import Path
     
     source_dir = Path(settings.RESUME_SOURCE_DIR)
     file_path = source_dir / request.base_resume
     
     if not file_path.exists():
-        # Fallback to an empty template if none found just for mock
         resume_text = "Senior Software Engineer with 5 years of experience."
     else:
         resume_text = extract_text(file_path)
         
-    missing = missing_skills_from_job([], resume_text) 
+    job_text = request.job_description
+    if request.job_url:
+        scraped = await scrape_job_page(request.job_url)
+        if scraped.text:
+            job_text = scraped.text + "\n" + job_text
+
+    missing = request.approved_skills
+    if missing is None:
+        missing = missing_skills_from_job([], resume_text) 
     
     agent = ResumeOptimizerAgent()
     opt = await agent.run(
         {
             "resume_json": resume_text[:12000],
             "ats_score": {"missing_skills": missing},
-            "job_description": request.job_description,
+            "job_description": job_text[:12000],
         }
     )
     

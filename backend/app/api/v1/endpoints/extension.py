@@ -18,6 +18,7 @@ from app.infrastructure.resume_library import (
     parse_contact,
     pick_base_resume,
 )
+from app.infrastructure.llm.client import structured_generate
 from app.core.config import get_settings
 
 router = APIRouter()
@@ -34,6 +35,20 @@ class ExtensionEventIn(BaseModel):
     confidence: float = 0.0
     reason: Optional[str] = None
     detail: Optional[str] = None
+
+
+class MapFieldsRequest(BaseModel):
+    labels: list[str] = Field(..., description="List of unmatched form labels from the page")
+
+
+class FieldMapping(BaseModel):
+    label: str
+    answer: str
+
+
+class MapFieldsResponse(BaseModel):
+    mappings: list[FieldMapping]
+
 
 
 @router.get("/profile")
@@ -111,13 +126,7 @@ async def extension_autofill_profile(
             "blocklist": prefs.get("blocklist"),
             "skip_queue_count": len(prefs.get("skip_queue") or []),
         },
-        "supported_hosts": prefs.get("allowlist")
-        or [
-            "boards.greenhouse.io",
-            "job-boards.greenhouse.io",
-            "jobs.lever.co",
-            "*.myworkdayjobs.com",
-        ],
+        "supported_hosts": prefs.get("allowlist") or ["*"],
     }
 
 
@@ -139,3 +148,52 @@ async def extension_events(
         reason=data.reason,
         detail=data.detail,
     )
+
+
+@router.post("/map-fields", response_model=MapFieldsResponse)
+async def map_unmatched_fields(
+    data: MapFieldsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Fallback LLM mapping for fields the fast regex couldn't match."""
+    if not data.labels:
+        return MapFieldsResponse(mappings=[])
+
+    # Fetch profile context
+    qa_list = await ScreeningQAService(db).list(current_user.id)
+    qa_text = "\n".join([f"Q: {q.question}\nA: {q.answer}" for q in qa_list[:50]])
+    
+    # Minimal profile fields
+    profile_text = f"Name: Candidate\nEmail: {current_user.email}\n"
+
+    system_msg = (
+        "You are an autofill assistant. Match the provided form field labels to the user's data.\n"
+        "User Data:\n"
+        f"{profile_text}\n"
+        "Screening Q&A:\n"
+        f"{qa_text}\n\n"
+        "Rules:\n"
+        "- If a label matches user data or Q&A, provide the exact 'answer' to fill.\n"
+        "- If it does not match anything, leave 'answer' blank or omit it.\n"
+        "- Keep it extremely concise."
+    )
+
+    user_msg = "Map these form labels:\n" + "\n".join(f"- {lbl}" for lbl in data.labels[:20])
+
+    messages = [
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": user_msg},
+    ]
+
+    try:
+        res = await structured_generate(
+            response_model=MapFieldsResponse,
+            messages=messages,
+            fallback=lambda: MapFieldsResponse(mappings=[]),
+            max_tokens=500,
+        )
+        return res
+    except Exception as e:
+        print(f"Map fields LLM error: {e}")
+        return MapFieldsResponse(mappings=[])

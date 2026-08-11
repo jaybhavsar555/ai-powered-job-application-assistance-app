@@ -59,6 +59,30 @@ async function reportEvent(payload) {
   }
 }
 
+async function mapFields(labels) {
+  const { apiBase, token } = await getConfig();
+  if (!token) return { ok: false, error: "No token" };
+  try {
+    const res = await fetch(`${apiBase}/extension/map-fields`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ labels: labels || [] }),
+    });
+    if (res.status === 401) {
+      await chrome.storage.local.remove(["token"]);
+      return { ok: false, error: "Session expired" };
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data.detail || res.statusText };
+    return { ok: true, mappings: data.mappings || [] };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "FETCH_PROFILE") {
     fetchProfile().then(sendResponse);
@@ -66,6 +90,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg?.type === "REPORT_EVENT") {
     reportEvent(msg.payload).then(sendResponse);
+    return true;
+  }
+  if (msg?.type === "MAP_FIELDS") {
+    mapFields(msg.labels).then(sendResponse);
     return true;
   }
   return false;
