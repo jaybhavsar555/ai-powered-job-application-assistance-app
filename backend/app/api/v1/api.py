@@ -21,6 +21,7 @@ from app.api.v1.endpoints import (
     screening_qa,
     extension,
     apply_prefs,
+    obsidian,
 )
 
 api_router = APIRouter()
@@ -53,3 +54,4 @@ api_router.include_router(
 api_router.include_router(
     apply_prefs.router, prefix="/apply-prefs", tags=["apply-prefs"]
 )
+api_router.include_router(obsidian.router, prefix="/obsidian", tags=["obsidian"])

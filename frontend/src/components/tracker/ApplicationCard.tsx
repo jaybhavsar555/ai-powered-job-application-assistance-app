@@ -11,6 +11,7 @@ export type ApplicationStage =
   | "Failed"
   | "Reapply"
   | "Applied"
+  | "Shortlisted"
   | "Interview"
   | "Rejected";
 
@@ -134,7 +135,7 @@ export function ApplicationCard({
               {busy ? "Packaging…" : "Package"}
             </button>
           )}
-          {application.stage === "Interview" && (
+          {(application.stage === "Interview" || application.stage === "Shortlisted") && (
             <Link
               href={`/interviews/${application.id}`}
               title="View Interview Prep Guide & Mock Interview Simulator"

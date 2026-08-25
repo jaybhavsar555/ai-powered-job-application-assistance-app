@@ -25,6 +25,8 @@ import {
 import { StructuredResumeEditor, StructuredResumeData } from "@/components/ui/StructuredResumeEditor";
 import { useAuthStore } from "@/store/auth";
 import { usePanelStore } from "@/store/panelStore";
+import { useWorkflowStore } from "@/hooks/useWorkflowStore";
+import { useRouter } from "next/navigation";
 
 interface BaseResume {
   name: string;
@@ -124,8 +126,8 @@ export default function ResumesPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailSaving, setDetailSaving] = useState(false);
   const token = useAuthStore((s) => s.token);
-  const [selectedBaseResume, setSelectedBaseResume] = useState<string | null>(null);
-  const [showTailorModal, setShowTailorModal] = useState(false);
+  const router = useRouter();
+  const setTailorState = useWorkflowStore((s) => s.setTailorState);
 
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -870,9 +872,10 @@ export default function ResumesPage() {
                               <button
                                 type="button"
                                 title="Use for Tailor JD"
+                                aria-label="Use for Tailor JD"
                                 onClick={() => {
-                                  setSelectedBaseResume(resume.name);
-                                  setShowTailorModal(true);
+                                  setTailorState({ selectedBaseResume: resume.name, step: 1 });
+                                  router.push("/tailor");
                                 }}
                                 className="p-2 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
                               >
@@ -989,18 +992,18 @@ export default function ResumesPage() {
                     <p className="text-xs text-muted-foreground">
                       {detail.original.label}
                     </p>
-                    <pre className="text-xs whitespace-pre-wrap max-h-72 overflow-y-auto font-mono text-muted-foreground">
+                    <div className="text-sm leading-relaxed whitespace-pre-wrap max-h-72 overflow-y-auto os-scrollbar text-muted-foreground">
                       {detail.original.text}
-                    </pre>
+                    </div>
                   </div>
                   <div className="rounded-lg border p-3 space-y-2">
                     <h3 className="text-sm font-semibold">Tailored</h3>
                     <p className="text-xs text-muted-foreground">
                       {detail.approved ? "Saved version" : "Workflow draft"}
                     </p>
-                    <pre className="text-xs whitespace-pre-wrap max-h-72 overflow-y-auto font-mono">
+                    <div className="text-sm leading-relaxed whitespace-pre-wrap max-h-72 overflow-y-auto os-scrollbar">
                       {detail.tailored.preview || "No tailored content yet."}
-                    </pre>
+                    </div>
                   </div>
                 </div>
 

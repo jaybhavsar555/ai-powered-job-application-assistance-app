@@ -126,6 +126,19 @@ class ApplicationService:
         if stage == "Applied" and previous != "Applied":
             follow_up_meta = await schedule_follow_up_on_applied(self.db, app)
 
+        # Mirror to Obsidian second brain (Jay OS) when configured
+        try:
+            from app.core.config import get_settings
+            from app.application.services.obsidian_vault import ObsidianVaultService
+
+            settings = get_settings()
+            if settings.OBSIDIAN_SYNC_ON_STAGE_CHANGE and (settings.OBSIDIAN_VAULT_PATH or "").strip():
+                vault = ObsidianVaultService(self.db)
+                await vault.sync_application(user_id, application_id)
+        except Exception as exc:
+            # Never block Kanban on vault I/O
+            print(f"[obsidian] sync on stage change skipped: {exc}")
+
         result = await self.db.execute(
             select(DBApplication)
             .where(DBApplication.id == application_id, DBApplication.user_id == user_id)
