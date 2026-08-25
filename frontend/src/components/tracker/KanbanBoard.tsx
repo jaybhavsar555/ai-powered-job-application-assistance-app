@@ -15,6 +15,7 @@ const STAGES: { stage: ApplicationStage; accent: string }[] = [
   { stage: "Failed", accent: "bg-rose-500" },
   { stage: "Reapply", accent: "bg-cyan-500" },
   { stage: "Applied", accent: "bg-amber-400" },
+  { stage: "Shortlisted", accent: "bg-fuchsia-400" },
   { stage: "Interview", accent: "bg-violet-400" },
   { stage: "Rejected", accent: "bg-red-400" },
 ];

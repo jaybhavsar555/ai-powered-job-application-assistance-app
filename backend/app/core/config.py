@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     # Portable defaults; Docker compose overrides to /data/resumes and /data/packages
     RESUME_SOURCE_DIR: str = "./data/resumes"
     APPLICATION_PACKAGE_DIR: str = "./data/packages"
+    # Local Obsidian vault (Jay OS). Windows example:
+    # OBSIDIAN_VAULT_PATH=C:\Users\Asus\OneDrive\Desktop\Jay OS
+    # Docker: mount that folder to /data/obsidian and set OBSIDIAN_VAULT_PATH=/data/obsidian
+    OBSIDIAN_VAULT_PATH: str = "./data/obsidian"
+    OBSIDIAN_SYNC_ON_STAGE_CHANGE: bool = True
 
     # SMTP — optional; without it, outreach uses copy/mailto (no fake Sent in prod)
     SMTP_HOST: str = ""

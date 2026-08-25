@@ -11,6 +11,7 @@ APPLICATION_STAGES = [
     "Failed",
     "Reapply",
     "Applied",
+    "Shortlisted",
     "Interview",
     "Rejected",
 ]
@@ -22,7 +23,10 @@ class ApplicationCreate(BaseModel):
 class ApplicationStageUpdate(BaseModel):
     stage: str = Field(
         ...,
-        description="Wishlist | Researching | Ready | Needs input | Failed | Reapply | Applied | Interview | Rejected",
+        description=(
+            "Wishlist | Researching | Ready | Needs input | Failed | Reapply | "
+            "Applied | Shortlisted | Interview | Rejected"
+        ),
     )
 
 class JobSummary(BaseModel):

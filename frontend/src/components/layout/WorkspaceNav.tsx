@@ -22,6 +22,7 @@ import {
   Sparkles,
   HelpCircle,
   Wand2,
+  Brain,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useModeStore } from "@/store/modeStore";
@@ -35,6 +36,7 @@ const simplePrimary: NavItem[] = [
   { name: "Quick Apply", href: "/quick-apply", icon: Send },
   { name: "Apply", href: "/apply", icon: Sparkles },
   { name: "Resumes", href: "/resumes", icon: FileText },
+  { name: "Second Brain", href: "/second-brain", icon: Brain },
   { name: "Tracker", href: "/tracker", icon: Network },
   { name: "Outreach", href: "/outreach", icon: Send },
   { name: "Approvals", href: "/approvals", icon: ClipboardCheck },
