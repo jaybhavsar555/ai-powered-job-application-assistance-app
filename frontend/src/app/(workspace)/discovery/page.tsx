@@ -149,7 +149,6 @@ export default function DiscoveryPage() {
   const [recommendedJobs, setRecommendedJobs] = useState<DiscoveredJob[]>([]);
   const [activeTab, setActiveTab] = useState<"setup" | "results">("setup");
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [expandedJDs, setExpandedJDs] = useState<Record<string, boolean>>({});
   const [ingestingId, setIngestingId] = useState<string | null>(null);
   const [wishlistNotice, setWishlistNotice] = useState<string | null>(null);
   const [libraryResumes, setLibraryResumes] = useState<string[]>([]);

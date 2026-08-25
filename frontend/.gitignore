@@ -6,3 +6,10 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# Next.js / Turbopack (including accidental nested output)
+.next/
+frontend/
+out/
+dist/
+build/

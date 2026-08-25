@@ -116,5 +116,5 @@ export function useWorkflowStream(jobId: string, resume = false, nonce = 0) {
     return () => {
       eventSource.close();
     };
-  }, [jobId, resume, nonce]);
+  }, [jobId, resume, nonce, addEvent, reset, setActiveNode, setFinalState, setNodeTelemetry, setWorkflowStatus]);
 }

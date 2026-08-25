@@ -59,7 +59,7 @@ export function AssistantChat() {
           text: reply,
         },
       ]);
-    } catch (err) {
+    } catch {
       setMessages((prev) => [
         ...prev,
         {

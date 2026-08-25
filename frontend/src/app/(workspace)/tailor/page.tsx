@@ -168,7 +168,7 @@ export default function TailorPage() {
     };
     fetchLibrary();
     return () => { closePdf(); };
-  }, [token, authHeaders]);
+  }, [token, authHeaders, closePdf, selectedBaseResume, setSelectedBaseResume]);
 
   const handleAnalyzeJd = async () => {
     if (!jdText.trim() && !jobUrl.trim()) {

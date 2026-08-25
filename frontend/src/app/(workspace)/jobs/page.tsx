@@ -68,7 +68,7 @@ export default function JobsPage() {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     if (token) void fetchJobs();
