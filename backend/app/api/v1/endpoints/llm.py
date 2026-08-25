@@ -37,43 +37,50 @@ async def get_llm_telemetry(current_user: User = Depends(get_current_user)):
 async def list_model_presets(current_user: User = Depends(get_current_user)):
     """
     Recommended local / open models for Career OS agents.
-    See docs/local_llm_models.md.
+    See docs/install_open_models.md and docs/local_llm_models.md.
     """
     return {
         "presets": [
             {
                 "provider": "ollama",
-                "model": "qwen2.5:7b",
-                "label": "Qwen 2.5 7B (local)",
-                "notes": "Best default for laptop/desktop with 8GB+ RAM. Fully offline.",
-                "pull": "ollama pull qwen2.5:7b",
+                "model": "qwen3:8b",
+                "label": "Qwen3 8B (local · recommended)",
+                "notes": "Best daily default for Pipeline / Tailor on 16GB RAM.",
+                "pull": "ollama pull qwen3:8b",
+            },
+            {
+                "provider": "ollama",
+                "model": "qwen3:14b",
+                "label": "Qwen3 14B (local · stronger)",
+                "notes": "Noticeably better JSON/tailoring; needs ~12GB+ VRAM or 32GB RAM.",
+                "pull": "ollama pull qwen3:14b",
             },
             {
                 "provider": "ollama",
                 "model": "qwen2.5:3b",
                 "label": "Qwen 2.5 3B (light)",
-                "notes": "CPU-friendly; default in Docker Compose.",
+                "notes": "CPU-friendly / 8GB machines. Compose default.",
                 "pull": "ollama pull qwen2.5:3b",
             },
             {
                 "provider": "ollama",
-                "model": "llama3.1:8b",
-                "label": "Llama 3.1 8B (local)",
-                "notes": "Strong general English for scoring and drafts.",
-                "pull": "ollama pull llama3.1:8b",
+                "model": "deepseek-r1:7b",
+                "label": "DeepSeek-R1 7B (local reasoning)",
+                "notes": "Better multi-step fit scoring; slower (thinks first).",
+                "pull": "ollama pull deepseek-r1:7b",
             },
             {
                 "provider": "ollama",
-                "model": "deepseek-r1:8b",
-                "label": "DeepSeek R1 8B (local)",
-                "notes": "Reasoning-heavy evaluations; slower.",
-                "pull": "ollama pull deepseek-r1:8b",
+                "model": "deepseek-r1:14b",
+                "label": "DeepSeek-R1 14B (local reasoning)",
+                "notes": "Stronger reasoning distill for 12–16GB VRAM.",
+                "pull": "ollama pull deepseek-r1:14b",
             },
             {
                 "provider": "tokenharbor",
                 "model": "kimi-k3:free",
                 "label": "Kimi K3 free (Token Harbor)",
-                "notes": "Kimi-class without multi-GPU. Needs TOKENHARBOR_API_KEY.",
+                "notes": "Practical Kimi for Career OS — no multi-GPU download.",
                 "pull": None,
             },
             {
@@ -86,12 +93,16 @@ async def list_model_presets(current_user: User = Depends(get_current_user)):
             {
                 "provider": "ollama",
                 "model": "kimi-k2.6:cloud",
-                "label": "Kimi K2.6 via Ollama Cloud",
-                "notes": "Not local — ollama signin required; weights stay remote.",
-                "pull": "ollama run kimi-k2.6:cloud",
+                "label": "Kimi K2.6 (Ollama Cloud)",
+                "notes": "Not offline — ollama signin; weights stay remote.",
+                "pull": "ollama pull kimi-k2.6:cloud",
             },
         ],
-        "docs": "docs/local_llm_models.md",
+        "docs": "docs/install_open_models.md",
+        "install_script": {
+            "windows": "scripts/install-ollama-models.ps1",
+            "unix": "scripts/install-ollama-models.sh",
+        },
     }
 
 
