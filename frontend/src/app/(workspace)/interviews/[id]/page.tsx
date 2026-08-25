@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import api from "@/lib/api";
-import { Loader2, Sparkles, BookOpen, MessageSquare, Send, Zap, ChevronRight, Building2 } from "lucide-react";
+import { Loader2, Sparkles, BookOpen, MessageSquare, Send, Zap, Building2 } from "lucide-react";
 
 interface PrepData {
   company_dossier: string;
@@ -26,21 +26,7 @@ export default function InterviewPrepPage() {
   const [chatLoading, setChatLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    fetchPrep();
-  }, [id]);
-
-  useEffect(() => {
-    if (activeTab === "simulator" && messages.length === 0) {
-      setMessages([{ role: "assistant", content: "Hello! I'm ready to begin our mock interview. First, could you tell me a little bit about yourself and your background?" }]);
-    }
-  }, [activeTab]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  async function fetchPrep() {
+  const fetchPrep = useCallback(async () => {
     try {
       setLoading(true);
       const res = await api.get(`/applications/${id}/interview-prep`);
@@ -52,7 +38,21 @@ export default function InterviewPrepPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [id]);
+
+  useEffect(() => {
+    void fetchPrep();
+  }, [fetchPrep]);
+
+  useEffect(() => {
+    if (activeTab === "simulator" && messages.length === 0) {
+      setMessages([{ role: "assistant", content: "Hello! I'm ready to begin our mock interview. First, could you tell me a little bit about yourself and your background?" }]);
+    }
+  }, [activeTab, messages.length]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   async function handleGenerate() {
     try {

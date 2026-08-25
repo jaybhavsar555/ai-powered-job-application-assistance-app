@@ -2,17 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Plus, Trash2, Save, RotateCcw } from "lucide-react";
+import type { StructuredResumeData } from "@/types/resume";
 
-export interface StructuredResumeData {
-  summary?: string;
-  tailored_bullets?: string[];
-  added_keywords?: string[];
-  experience?: Array<{
-    company?: string;
-    title?: string;
-    bullets?: string[];
-  }>;
-}
+export type { StructuredResumeData };
 
 interface StructuredResumeEditorProps {
   value: StructuredResumeData;

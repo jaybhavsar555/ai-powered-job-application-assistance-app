@@ -12,6 +12,7 @@ import {
 import Link from "next/link";
 import { ResumeComparison } from "@/components/ui/ResumeComparison";
 import { StructuredResumeEditor, StructuredResumeData } from "@/components/ui/StructuredResumeEditor";
+import type { ParserChecks, UnifiedAtsPayload, TailorResumeRequestBody } from "@/types/resume";
 import { LatexEditor } from "@/components/ui/LatexEditor";
 
 interface BaseResume {
@@ -110,12 +111,12 @@ export default function TailorPage() {
   const [isTailoring, setIsTailoring] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [showComparison, setShowComparison] = useState(false);
-  const [downloadData, setDownloadData] = useState<any>(null);
+  const [downloadData, setDownloadData] = useState<StructuredResumeData | null>(null);
   const [latexPreview, setLatexPreview] = useState<string | null>(null);
   const [showLatex, setShowLatex] = useState(false);
   const [loadingLatex, setLoadingLatex] = useState(false);
-  const [parserChecks, setParserChecks] = useState<any>(null);
-  const [unifiedAts, setUnifiedAts] = useState<any>(null);
+  const [parserChecks, setParserChecks] = useState<ParserChecks | null>(null);
+  const [unifiedAts, setUnifiedAts] = useState<UnifiedAtsPayload | null>(null);
   const [structuredDraft, setStructuredDraft] = useState<StructuredResumeData>({});
   const [savingStudio, setSavingStudio] = useState(false);
   const [studioSavedId, setStudioSavedId] = useState<string | null>(null);
@@ -125,11 +126,7 @@ export default function TailorPage() {
     [token]
   );
 
-  useEffect(() => {
-    if (selectedBaseResume && token) previewResume(selectedBaseResume);
-  }, [selectedBaseResume, token]);
-
-  const previewResume = async (name: string) => {
+  const previewResume = useCallback(async (name: string) => {
     if (!token) return;
     try {
       const res = await fetch(
@@ -148,7 +145,11 @@ export default function TailorPage() {
         setOriginalResumeData({ text: data.text ?? "", fileUrl: data.file_url ?? undefined });
       }
     } catch { /* ignore */ }
-  };
+  }, [token, setPreview, setOriginalResumeData]);
+
+  useEffect(() => {
+    if (selectedBaseResume && token) previewResume(selectedBaseResume);
+  }, [selectedBaseResume, token, previewResume]);
 
   useEffect(() => {
     if (!token) return;
@@ -241,7 +242,7 @@ export default function TailorPage() {
     setIsTailoring(true);
     setError(null);
     try {
-      const body: any = {
+      const body: TailorResumeRequestBody = {
         job_description: jdText,
         job_url: jobUrl,
         base_resume: selectedBaseResume || baseResumes[0]?.name,
@@ -324,19 +325,23 @@ export default function TailorPage() {
     setFinalState({ tailored_resume: next });
   };
 
-  const handleDownloadDocx = async (editedData?: any) => {
+  const handleDownloadDocx = async (editedData?: StructuredResumeData) => {
     await downloadExport("/api/v1/documents/export/docx", editedData, "Tailored_Resume.docx");
   };
 
-  const handleDownloadPdf = async (editedData?: any) => {
+  const handleDownloadPdf = async (editedData?: StructuredResumeData) => {
     await downloadExport("/api/v1/documents/export/pdf", editedData, "Tailored_Resume.pdf");
   };
 
-  const handleDownloadTex = async (editedData?: any) => {
+  const handleDownloadTex = async (editedData?: StructuredResumeData) => {
     await downloadExport("/api/v1/documents/export/tex", editedData, "Tailored_Resume.tex");
   };
 
-  const downloadExport = async (url: string, editedData: any, filename: string) => {
+  const downloadExport = async (
+    url: string,
+    editedData: StructuredResumeData | undefined,
+    filename: string
+  ) => {
     setIsDownloading(true);
     try {
       const payload = editedData || finalState?.tailored_resume || {};
@@ -812,14 +817,14 @@ export default function TailorPage() {
                       Parser score {parserChecks.overall_parser_score}/100
                     </span>
                   </div>
-                  {(parserChecks.warnings?.length > 0) && (
+                  {((parserChecks.warnings?.length ?? 0) > 0) && (
                     <ul className="text-xs text-amber-600 dark:text-amber-400 list-disc pl-4 space-y-1">
-                      {parserChecks.warnings.map((w: string, i: number) => <li key={i}>{w}</li>)}
+                      {(parserChecks.warnings ?? []).map((w: string, i: number) => <li key={i}>{w}</li>)}
                     </ul>
                   )}
-                  {(parserChecks.suggestions?.length > 0) && (
+                  {((parserChecks.suggestions?.length ?? 0) > 0) && (
                     <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-1">
-                      {parserChecks.suggestions.slice(0, 3).map((s: string, i: number) => <li key={i}>{s}</li>)}
+                      {(parserChecks.suggestions ?? []).slice(0, 3).map((s: string, i: number) => <li key={i}>{s}</li>)}
                     </ul>
                   )}
                 </div>

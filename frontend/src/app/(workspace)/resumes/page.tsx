@@ -121,6 +121,7 @@ export default function ResumesPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<StudioDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [detailSaving, setDetailSaving] = useState(false);
   const token = useAuthStore((s) => s.token);
   const [selectedBaseResume, setSelectedBaseResume] = useState<string | null>(null);

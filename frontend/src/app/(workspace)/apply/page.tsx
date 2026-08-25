@@ -897,7 +897,7 @@ function StudioView({
                 {(session.receipt?.fields || session.form_fields).map(
                   (f, i) => (
                     <li
-                      key={("key" in f && f.key) || i}
+                      key={String(("key" in f && f.key != null) ? f.key : i)}
                       className="flex justify-between gap-3 px-4 py-2.5 text-sm"
                     >
                       <span className="text-muted-foreground shrink-0">
