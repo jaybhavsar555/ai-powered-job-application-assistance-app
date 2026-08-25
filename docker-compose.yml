@@ -52,6 +52,9 @@ services:
       # Put your base resumes (PDF/DOCX/MD) in ./data/resumes on the host
       - ./data/resumes:/data/resumes
       - ./data/packages:/data/packages
+      # Obsidian second brain — replace with Jay OS path on Windows if desired:
+      # - "C:/Users/Asus/OneDrive/Desktop/Jay OS:/data/obsidian"
+      - ./data/obsidian:/data/obsidian
     environment:
       # Docker DNS names (override localhost values from backend/.env)
       DATABASE_URL: postgresql+asyncpg://user:password@db:5432/aijobdb
@@ -70,6 +73,7 @@ services:
       JOB_DISCOVERY_MAX_RESULTS: "15"
       RESUME_SOURCE_DIR: /data/resumes
       APPLICATION_PACKAGE_DIR: /data/packages
+      OBSIDIAN_VAULT_PATH: /data/obsidian
       ENVIRONMENT: development
       CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001
       CHECKPOINT_BACKEND: postgres
