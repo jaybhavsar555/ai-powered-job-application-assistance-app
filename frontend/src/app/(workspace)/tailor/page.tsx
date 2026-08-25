@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { useAuthStore } from "@/store/auth";
+import { apiFetch } from "@/lib/api";
 import { usePanelStore } from "@/store/panelStore";
 import { useWorkflowStore, SkillImpact } from "@/hooks/useWorkflowStore";
 import {
@@ -129,7 +130,7 @@ export default function TailorPage() {
   const previewResume = useCallback(async (name: string) => {
     if (!token) return;
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/documents/library-preview?name=${encodeURIComponent(name)}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -155,7 +156,7 @@ export default function TailorPage() {
     if (!token) return;
     const fetchLibrary = async () => {
       try {
-        const res = await fetch("/api/v1/documents/resume-library", { headers: authHeaders() });
+        const res = await apiFetch("/api/v1/documents/resume-library", { headers: authHeaders() });
         if (res.ok) {
           const data = await res.json();
           const files = data.files || [];
@@ -178,7 +179,7 @@ export default function TailorPage() {
     setError(null);
     setScrapeWarning(null);
     try {
-      const res = await fetch("/api/v1/workflows/analyze-jd-skills", {
+      const res = await apiFetch("/api/v1/workflows/analyze-jd-skills", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
@@ -253,7 +254,7 @@ export default function TailorPage() {
       if (iterativeMode && iterativeTailoredText) {
         body.current_tailored_text = iterativeTailoredText;
       }
-      const res = await fetch("/api/v1/workflows/tailor-resume", {
+      const res = await apiFetch("/api/v1/workflows/tailor-resume", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify(body),
@@ -293,7 +294,7 @@ export default function TailorPage() {
     setSavingStudio(true);
     setError(null);
     try {
-      const res = await fetch("/api/v1/resumes/studio/save-tailor", {
+      const res = await apiFetch("/api/v1/resumes/studio/save-tailor", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
@@ -345,7 +346,7 @@ export default function TailorPage() {
     setIsDownloading(true);
     try {
       const payload = editedData || finalState?.tailored_resume || {};
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify(payload),
@@ -372,7 +373,7 @@ export default function TailorPage() {
     if (!payload) return;
     setLoadingLatex(true);
     try {
-      const res = await fetch("/api/v1/documents/export/tex", {
+      const res = await apiFetch("/api/v1/documents/export/tex", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify(payload),
@@ -415,7 +416,7 @@ export default function TailorPage() {
     setIsTailoring(true);
     setError(null);
     try {
-      const res = await fetch("/api/v1/workflows/analyze-jd-skills", {
+      const res = await apiFetch("/api/v1/workflows/analyze-jd-skills", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
@@ -524,6 +525,10 @@ export default function TailorPage() {
           {/* ── STEP 1 ── */}
           {step === 1 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="rounded-lg border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+                After analyze you get skill-gap review, a structured editor, ATS parser checks,
+                Save to Studio, and LaTeX/PDF download — not just a rewritten blob.
+              </div>
               <div className="space-y-2">
                 <label className="text-sm font-semibold">Master template</label>
                 <p className="text-xs text-muted-foreground mb-2">

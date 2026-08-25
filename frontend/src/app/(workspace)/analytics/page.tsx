@@ -6,6 +6,7 @@ import {
   Filter, Zap
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import { apiFetch } from "@/lib/api";
 
 interface AgentBreakdown {
   agent_name: string;
@@ -50,11 +51,7 @@ export default function AnalyticsPage() {
   useEffect(() => {
     const fetchAnalytics = async () => {
       try {
-        const res = await fetch("/api/v1/analytics/summary", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        const res = await apiFetch("/api/v1/analytics/summary");
         if (res.ok) {
           const json = await res.json();
           setData(json);

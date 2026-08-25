@@ -13,6 +13,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import { apiFetch } from "@/lib/api";
 import {
   PageMessageBanner,
   type PageMessage,
@@ -70,7 +71,7 @@ export default function QuickApplyPage() {
     }
     try {
       setBusy(true);
-      const res = await fetch("/api/v1/jobs/quick-apply-from-post", {
+      const res = await apiFetch("/api/v1/jobs/quick-apply-from-post", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -128,7 +129,7 @@ export default function QuickApplyPage() {
 
   const downloadResume = async (): Promise<boolean> => {
     if (!result?.resume_download_url || !token) return false;
-    const res = await fetch(result.resume_download_url, {
+    const res = await apiFetch(result.resume_download_url, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) {

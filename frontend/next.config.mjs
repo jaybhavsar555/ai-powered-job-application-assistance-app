@@ -1,6 +1,15 @@
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  // Keep Turbopack rooted on frontend/ (avoids parent lockfile / empty Tailwind content)
+  turbopack: {
+    root: __dirname,
+  },
   async rewrites() {
     // Docker compose publishes API as host:8001 → container:8000
     // Use 127.0.0.1 (not localhost) to avoid Windows resolving to ::1

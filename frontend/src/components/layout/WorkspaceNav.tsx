@@ -33,9 +33,9 @@ const simplePrimary: NavItem[] = [
   { name: "Inbox", href: "/inbox", icon: LayoutDashboard },
   { name: "Jobs", href: "/jobs", icon: Store },
   { name: "Tailor", href: "/tailor", icon: Wand2 },
+  { name: "Resumes", href: "/resumes", icon: FileText },
   { name: "Quick Apply", href: "/quick-apply", icon: Send },
   { name: "Apply", href: "/apply", icon: Sparkles },
-  { name: "Resumes", href: "/resumes", icon: FileText },
   { name: "Second Brain", href: "/second-brain", icon: Brain },
   { name: "Knowledge Vault", href: "/vault", icon: Database },
   { name: "Tracker", href: "/tracker", icon: Network },
@@ -52,11 +52,16 @@ const simpleMore: NavItem[] = [
 ];
 
 const advancedNavItems: NavItem[] = [
+  { name: "Inbox", href: "/inbox", icon: LayoutDashboard },
+  { name: "Jobs", href: "/jobs", icon: Store },
+  { name: "Tailor", href: "/tailor", icon: Wand2 },
+  { name: "Resumes", href: "/resumes", icon: FileText },
+  { name: "Apply", href: "/apply", icon: Sparkles },
   { name: "Canvas", href: "/canvas", icon: BrainCircuit },
+  { name: "Approvals", href: "/approvals", icon: ClipboardCheck },
   { name: "Second Brain", href: "/second-brain", icon: Brain },
   { name: "Knowledge Vault", href: "/vault", icon: Database },
   { name: "Screening Q&A", href: "/screening-qa", icon: HelpCircle },
-  { name: "Approvals", href: "/approvals", icon: ClipboardCheck },
   { name: "Tracker", href: "/tracker", icon: Network },
   { name: "Analytics", href: "/analytics", icon: LineChart },
   { name: "Marketplace", href: "/marketplace", icon: Store },

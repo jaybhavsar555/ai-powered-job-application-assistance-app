@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Building2, Search, Activity } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import { apiFetch } from "@/lib/api";
 
 interface Company {
   id: string;
@@ -20,9 +21,7 @@ export default function CompaniesPage() {
     const fetchCompanies = async () => {
       try {
         setLoading(true);
-        const res = await fetch("/api/v1/companies/", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await apiFetch("/api/v1/companies/");
         if (res.ok) {
           const data = await res.json();
           setCompanies(data);

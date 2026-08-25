@@ -13,6 +13,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import { apiFetch } from "@/lib/api";
 import {
   PageMessageBanner,
   PageMessage,
@@ -58,7 +59,7 @@ export default function SecondBrainPage() {
     if (!token) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/v1/obsidian/status", { headers: authHeaders() });
+      const res = await apiFetch("/api/v1/obsidian/status", { headers: authHeaders() });
       if (!res.ok) throw new Error("Could not load Obsidian status");
       const data = await res.json();
       setStatus(data);
@@ -80,7 +81,7 @@ export default function SecondBrainPage() {
     setBusy(true);
     setBanner(null);
     try {
-      const res = await fetch(`/api/v1/obsidian/${path}`, {
+      const res = await apiFetch(`/api/v1/obsidian/${path}`, {
         method: "POST",
         headers: authHeaders(),
         body: body ? JSON.stringify(body) : undefined,

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Users, Search, Copy, Linkedin, Mail, Save, ExternalLink } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import { apiFetch } from "@/lib/api";
 import {
   PageMessageBanner,
   messageFromError,
@@ -35,9 +36,7 @@ export default function RecruitersPage() {
     const fetchRecruiters = async () => {
       try {
         setLoading(true);
-        const res = await fetch("/api/v1/recruiters/", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await apiFetch("/api/v1/recruiters/");
         if (res.ok) {
           const data = await res.json();
           setRecruiters(data);
@@ -72,10 +71,9 @@ export default function RecruitersPage() {
     setSavingId(id);
     setNotice(null);
     try {
-      const res = await fetch(`/api/v1/recruiters/${id}`, {
+      const res = await apiFetch(`/api/v1/recruiters/${id}`, {
         method: "PATCH",
         headers: {
-          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

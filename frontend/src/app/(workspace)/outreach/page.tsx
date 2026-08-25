@@ -16,6 +16,7 @@ import {
   FileStack,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import { apiFetch } from "@/lib/api";
 import { usePanelStore } from "@/store/panelStore";
 import {
   PageMessageBanner,
@@ -102,7 +103,7 @@ export default function OutreachPage() {
     const fetchMessages = async () => {
       try {
         setLoading(true);
-        const res = await fetch("/api/v1/messages/", {
+        const res = await apiFetch("/api/v1/messages/", {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
@@ -164,7 +165,7 @@ export default function OutreachPage() {
   const handleRegenerate = async (id: string) => {
     try {
       setRegenId(id);
-      const res = await fetch(`/api/v1/messages/${id}/regenerate`, {
+      const res = await apiFetch(`/api/v1/messages/${id}/regenerate`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -197,7 +198,7 @@ export default function OutreachPage() {
     if (!d) return;
     try {
       setSavingId(id);
-      const res = await fetch(`/api/v1/messages/${id}`, {
+      const res = await apiFetch(`/api/v1/messages/${id}`, {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -227,7 +228,7 @@ export default function OutreachPage() {
   const previewAttachment = async (att: Attachment) => {
     if (!att.preview_url || !token) return;
     try {
-      const res = await fetch(att.preview_url, {
+      const res = await apiFetch(att.preview_url, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
@@ -258,7 +259,7 @@ export default function OutreachPage() {
         ...prev,
         [id]: { ...prev[id], saving: true },
       }));
-      const res = await fetch(`/api/v1/messages/${id}/contact`, {
+      const res = await apiFetch(`/api/v1/messages/${id}/contact`, {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -317,7 +318,7 @@ export default function OutreachPage() {
     try {
       setSendingId(id);
       const qs = force ? "?force=true" : "";
-      const res = await fetch(`/api/v1/messages/${id}/send${qs}`, {
+      const res = await apiFetch(`/api/v1/messages/${id}/send${qs}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -344,7 +345,7 @@ export default function OutreachPage() {
           // Prefer: download resume + open Gmail (avoids missed attach)
           if (data.resume_download_url && token) {
             try {
-              const r = await fetch(data.resume_download_url, {
+              const r = await apiFetch(data.resume_download_url, {
                 headers: { Authorization: `Bearer ${token}` },
               });
               if (r.ok) {
@@ -398,7 +399,7 @@ export default function OutreachPage() {
     }
     if (resumeAtt?.download_url && token) {
       try {
-        const r = await fetch(resumeAtt.download_url, {
+        const r = await apiFetch(resumeAtt.download_url, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (r.ok) {
@@ -428,7 +429,7 @@ export default function OutreachPage() {
   const handleMarkSent = async (id: string) => {
     try {
       setSendingId(id);
-      const res = await fetch(`/api/v1/messages/${id}/mark-sent`, {
+      const res = await apiFetch(`/api/v1/messages/${id}/mark-sent`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -704,7 +705,7 @@ export default function OutreachPage() {
                             className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs hover:bg-muted"
                             onClick={(e) => {
                               e.preventDefault();
-                              fetch(resumeAtt.download_url!, {
+                              apiFetch(resumeAtt.download_url!, {
                                 headers: { Authorization: `Bearer ${token}` },
                               })
                                 .then((r) => r.blob())

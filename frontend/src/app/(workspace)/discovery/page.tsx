@@ -21,6 +21,7 @@ import {
   Info,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import { apiFetch } from "@/lib/api";
 
 interface PreferenceState {
   targetRoles: string;
@@ -161,7 +162,7 @@ export default function DiscoveryPage() {
   const loadLibrary = async () => {
     if (!token) return;
     try {
-      const res = await fetch("/api/v1/documents/resume-library", {
+      const res = await apiFetch("/api/v1/documents/resume-library", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
@@ -181,7 +182,7 @@ export default function DiscoveryPage() {
     if (!token) return;
     (async () => {
       try {
-        const res = await fetch("/api/v1/apply-prefs", {
+        const res = await apiFetch("/api/v1/apply-prefs", {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) return;
@@ -208,7 +209,7 @@ export default function DiscoveryPage() {
     try {
       const form = new FormData();
       form.append("file", file);
-      const res = await fetch("/api/v1/documents/upload", {
+      const res = await apiFetch("/api/v1/documents/upload", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: form,
@@ -265,7 +266,7 @@ export default function DiscoveryPage() {
     setAutofillNote(null);
     setPageMessage(null);
     try {
-      const res = await fetch("/api/v1/workflows/analyze-resumes", {
+      const res = await apiFetch("/api/v1/workflows/analyze-resumes", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -334,7 +335,7 @@ export default function DiscoveryPage() {
     setWishlistNotice(null);
     setPageMessage(null);
     try {
-      const res = await fetch("/api/v1/workflows/discover", {
+      const res = await apiFetch("/api/v1/workflows/discover", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -398,7 +399,7 @@ export default function DiscoveryPage() {
         .filter(Boolean)
         .join("\n");
 
-      const res = await fetch("/api/v1/jobs/ingest", {
+      const res = await apiFetch("/api/v1/jobs/ingest", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -790,7 +791,7 @@ export default function DiscoveryPage() {
                           workAuthorization: value,
                         });
                         if (!token) return;
-                        void fetch("/api/v1/apply-prefs", {
+                        void apiFetch("/api/v1/apply-prefs", {
                           method: "PUT",
                           headers: {
                             Authorization: `Bearer ${token}`,

@@ -470,6 +470,28 @@ async def get_inbox_summary(
         ],
     }
 
+    digest_lines: list[str] = []
+    if new_jobs_48h:
+        digest_lines.append(
+            f"{len(new_jobs_48h)} new role(s) under 48h — apply now for better odds."
+        )
+    if ready_count:
+        digest_lines.append(f"{ready_count} Ready to apply via Review & Apply.")
+    if follow_ups:
+        digest_lines.append(
+            f"{len(follow_ups)} follow-up draft(s) due — send from Outreach."
+        )
+    if needs_input_count:
+        digest_lines.append(
+            f"{needs_input_count} paused on captcha/login/missing answers."
+        )
+    if failed_count or reapply_count:
+        digest_lines.append(
+            f"{failed_count} Failed / {reapply_count} Reapply — fix then resume."
+        )
+    if not digest_lines:
+        digest_lines.append("Quiet day — run Discovery or import a portal URL.")
+
     return {
         "total_applications": total,
         "wishlist_count": wishlist_count,
@@ -522,6 +544,10 @@ async def get_inbox_summary(
         ],
         "active_pipeline_step": active_step,
         "readiness": readiness,
+        "digest": {
+            "headline": "Career OS daily digest",
+            "summary_lines": digest_lines,
+        },
         "positioning": {
             "headline": "Tailored resume + cover + outreach — then autofill the form",
             "quality_first": True,
