@@ -281,6 +281,9 @@ async def persist_ats_and_approval_flags(
     tailored_resume: Optional[dict] = None,
     cover_letter: Optional[str] = None,
     requires_human_approval: bool = False,
+    ats_parser: Optional[dict] = None,
+    ats_rationale: Optional[str] = None,
+    qualifications_match: Optional[str] = None,
 ) -> None:
     job, app = await _get_job_and_app(db, job_id)
     if not app:
@@ -295,6 +298,12 @@ async def persist_ats_and_approval_flags(
         patch["matching_skills"] = matching_skills
     if ats_recommendation is not None:
         patch["ats_recommendation"] = ats_recommendation
+    if ats_parser is not None:
+        patch["ats_parser"] = ats_parser
+    if ats_rationale is not None:
+        patch["ats_rationale"] = ats_rationale
+    if qualifications_match is not None:
+        patch["qualifications_match"] = qualifications_match
     if tailored_resume is not None:
         patch["tailored_resume"] = tailored_resume
     if cover_letter is not None:

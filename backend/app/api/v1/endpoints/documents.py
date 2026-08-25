@@ -105,6 +105,33 @@ async def export_resume_tex(
     )
 
 
+class CompileTexRequest(BaseModel):
+    tex_content: str = Field(..., min_length=1, max_length=120_000)
+    filename: str = Field(default="Tailored_Resume")
+
+
+@router.post("/compile/tex")
+async def compile_tex_to_pdf(
+    body: CompileTexRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Compile edited LaTeX source to PDF (in-browser editor round-trip)."""
+    generator = DocumentGenerator()
+    try:
+        pdf_stream = generator.compile_tex(body.tex_content)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    safe_name = "".join(c for c in body.filename if c.isalnum() or c in "._-") or "Resume"
+    return StreamingResponse(
+        pdf_stream,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={safe_name}.pdf"},
+    )
+
+
 @router.get("/resume-library")
 async def resume_library_status(
     db: AsyncSession = Depends(get_db),

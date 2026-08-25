@@ -150,18 +150,15 @@ async def company_research_node(state: AgentState):
 
 
 async def ats_analysis_node(state: AgentState):
-    agent = agent_registry.get_agent("ats_analyzer")
+    from app.application.services.ats_service import ATSService
+
     job_details = state.get("job_details", {})
     job_str = json.dumps(job_details)
     base_resume = _get_base_resume_text(job_details)
 
-    agent_state = {
-        "resume_json": base_resume,
-        "job_description": job_str,
-    }
-
-    result = await agent.execute(agent_state, application_id=state.get("job_id"))
-    ats_res = result.get("ats_score", {})
+    ats_service = ATSService()
+    unified = await ats_service.analyze(base_resume, job_str)
+    ats_res = ats_service.to_legacy_ats_score(unified)
 
     try:
         from app.application.services.workflow_persistence import persist_ats_and_approval_flags
@@ -174,6 +171,9 @@ async def ats_analysis_node(state: AgentState):
                 missing_skills=ats_res.get("missing_skills") or [],
                 matching_skills=ats_res.get("matching_skills") or [],
                 ats_recommendation=ats_res.get("recommendation"),
+                ats_parser=unified.parser_checks.model_dump(),
+                ats_rationale=unified.rationale,
+                qualifications_match=unified.qualifications_match,
             )
     except Exception as e:
         print(f"[persist] ats failed: {e}")
