@@ -183,7 +183,7 @@ async def extension_autofill_profile(
             "phone": phone,
             "linkedin": linkedin,
             "location": location,
-            "work_authorization": "",
+            "work_authorization": prefs.get("work_authorization") or "",
         },
         "resume": resume_meta,
         "screening_qa": qa[:50],

@@ -49,6 +49,8 @@ class ApplyPrefsService:
             "auto_enabled_globally": self.settings.AUTO_APPLY_ENABLED,
             "usage": {"day": _day_key(), "day_count": 0, "hour": _hour_key(), "hour_count": 0},
             "skip_queue": [],  # recent skip reasons for resume
+            # Tsenta-style work-auth: used by extension + Discovery filter
+            "work_authorization": "",  # citizen | opt | needs_sponsorship | other
         }
 
     async def _entity(self, user_id: UUID) -> Optional[DBWikiEntity]:
@@ -124,6 +126,13 @@ class ApplyPrefsService:
                 if "skip_queue" in patch
                 else (current.get("skip_queue") or [])
             )[:40],
+            "work_authorization": str(
+                patch.get(
+                    "work_authorization",
+                    current.get("work_authorization") or "",
+                )
+                or ""
+            ).strip()[:40],
             "updated_at": _utc_now().isoformat(),
         }
         # Security lists always from config

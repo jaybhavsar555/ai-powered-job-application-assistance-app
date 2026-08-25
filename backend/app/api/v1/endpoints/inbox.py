@@ -491,8 +491,35 @@ async def get_inbox_summary(
         "apply_mode": apply_mode,
         "apply_mode_note": mode_note,
         "auto_consent": bool(prefs.get("auto_consent")),
+        "work_authorization": prefs.get("work_authorization") or "",
         "auto_usage": prefs.get("usage"),
         "pipeline_steps": PIPELINE_STEPS,
+        "pipeline_stages": [
+            {
+                "id": "find",
+                "title": "Find",
+                "desc": "Vault ATS/portals + boards. Match % before LinkedIn noise.",
+                "href": "/discovery",
+            },
+            {
+                "id": "prep",
+                "title": "Prep",
+                "desc": "Tailor resume + cover from facts. Diff on Approvals — nothing silent.",
+                "href": "/tailor",
+            },
+            {
+                "id": "apply",
+                "title": "Apply",
+                "desc": "Extension fills the ATS. You click Submit. Receipt saved.",
+                "href": "/apply",
+            },
+            {
+                "id": "track",
+                "title": "Track",
+                "desc": "Applied → follow-up ~3 days. Replies stay on the job, not a spreadsheet.",
+                "href": "/tracker",
+            },
+        ],
         "active_pipeline_step": active_step,
         "readiness": readiness,
         "positioning": {

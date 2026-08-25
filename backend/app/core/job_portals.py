@@ -1,5 +1,18 @@
 """Canonical job-board / portal URLs for Vault seeding."""
 
+ATS_HOST_MARKERS = (
+    "greenhouse.io",
+    "lever.co",
+    "ashbyhq.com",
+    "myworkdayjobs.com",
+)
+
+
+def is_ats_host(host_or_url: str) -> bool:
+    h = (host_or_url or "").lower()
+    return any(m in h for m in ATS_HOST_MARKERS)
+
+
 JOB_PORTALS = [
     {"title": "Remotive", "url": "https://remotive.com/remote-jobs", "region": "Remote"},
     {"title": "RemoteOK", "url": "https://remoteok.com/", "region": "Remote"},
@@ -16,4 +29,35 @@ JOB_PORTALS = [
     {"title": "We Work Remotely", "url": "https://weworkremotely.com/", "region": "Remote"},
     {"title": "FlexJobs", "url": "https://www.flexjobs.com/", "region": "Remote"},
     {"title": "Welcome to the Jungle", "url": "https://app.welcometothejungle.com/jobs", "region": "Global"},
+    # ATS career-page hosts (Tsenta-class Find: company sites, not LinkedIn)
+    {
+        "title": "Greenhouse boards",
+        "url": "https://boards.greenhouse.io/",
+        "region": "Global",
+        "category": "ats_career_page",
+    },
+    {
+        "title": "Greenhouse job boards",
+        "url": "https://job-boards.greenhouse.io/",
+        "region": "Global",
+        "category": "ats_career_page",
+    },
+    {
+        "title": "Lever jobs",
+        "url": "https://jobs.lever.co/",
+        "region": "Global",
+        "category": "ats_career_page",
+    },
+    {
+        "title": "Ashby jobs",
+        "url": "https://jobs.ashbyhq.com/",
+        "region": "Global",
+        "category": "ats_career_page",
+    },
+    {
+        "title": "Workday jobs",
+        "url": "https://www.myworkdayjobs.com/",
+        "region": "Global",
+        "category": "ats_career_page",
+    },
 ]

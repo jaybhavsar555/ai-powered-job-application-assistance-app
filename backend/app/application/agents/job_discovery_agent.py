@@ -86,6 +86,44 @@ def _portal_host(url: str) -> str:
     return host
 
 
+def _company_from_ats_url(url: str, fallback: str) -> str:
+    """Pull the company slug from Greenhouse / Lever / Ashby / Workday URLs."""
+    import urllib.parse
+
+    parsed = urllib.parse.urlparse(url or "")
+    host = (parsed.netloc or "").lower()
+    parts = [p for p in (parsed.path or "").split("/") if p]
+    skip = {"jobs", "job", "embed", "en-us", "en-gb", "apply"}
+    slug = next((p for p in parts if p.lower() not in skip and not p.isdigit()), "")
+    if slug and (
+        "greenhouse.io" in host
+        or "lever.co" in host
+        or "ashbyhq.com" in host
+        or "myworkdayjobs.com" in host
+    ):
+        return slug.replace("-", " ").replace("_", " ").title()[:80]
+    return fallback
+
+
+_NO_SPONSOR_RE = re.compile(
+    r"no(?:t)?\s+(?:visa\s+)?sponsor|must be (?:a )?(?:us|u\.s\.) citizen|"
+    r"green card required|gc required|sponsorship not available|"
+    r"will not sponsor",
+    re.I,
+)
+
+
+def _mentions_no_sponsor(job: Dict[str, Any]) -> bool:
+    blob = " ".join(
+        [
+            str(job.get("title") or ""),
+            str(job.get("description") or ""),
+            str(job.get("company_name") or ""),
+        ]
+    )
+    return bool(_NO_SPONSOR_RE.search(blob))
+
+
 class JobDiscoveryAgent:
     def __init__(self, llm_service=None, knowledge_service=None):
         self.llm = llm_service
@@ -419,11 +457,12 @@ class JobDiscoveryAgent:
                             snippet = snippets[i].get_text(strip=True)
 
                         portal_name = title_by_host.get(host) or host or "Vault Portal"
+                        company = _company_from_ats_url(link, portal_name)
                         out.append(
                             {
                                 "id": f"vault-{abs(hash(link)) % 10_000_000}",
                                 "title": title[:160],
-                                "company_name": portal_name,
+                                "company_name": company,
                                 "candidate_required_location": location
                                 or "Hybrid/Remote",
                                 "salary": "Competitive",
@@ -454,7 +493,7 @@ class JobDiscoveryAgent:
         Portals with known feeds/APIs (Remotive, RemoteOK, Arbeitnow, WWR) are
         fetched directly; remaining hosts go through DuckDuckGo site: filters.
         """
-        from app.core.job_portals import JOB_PORTALS
+        from app.core.job_portals import JOB_PORTALS, is_ats_host
 
         portal_list = portals or [
             {
@@ -479,9 +518,10 @@ class JobDiscoveryAgent:
             ),
         }
 
-        combined: List[Dict[str, Any]] = []
+        api_rows: List[Dict[str, Any]] = []
         seen: set[str] = set()
-        ddg_portals: List[Dict[str, str]] = []
+        ddg_ats: List[Dict[str, str]] = []
+        ddg_other: List[Dict[str, str]] = []
 
         for p in portal_list:
             host = _portal_host(p.get("url") or "")
@@ -493,54 +533,55 @@ class JobDiscoveryAgent:
                     logger.warning("Vault API/RSS for %s failed: %s", host, exc)
                     rows = []
                 for row in rows:
-                    # Keep original board source when useful, but mark vault-driven
                     row = dict(row)
-                    if row.get("source") in ("remotive", "remoteok", "arbeitnow"):
-                        # Leave source as-is so UI still shows board — still vault-driven
-                        pass
-                    else:
-                        row["source"] = "vault_portals"
                     key = (row.get("url") or "").rstrip("/").lower()
                     if not key or key in seen:
                         continue
                     seen.add(key)
-                    combined.append(row)
-                    if len(combined) >= limit:
-                        break
+                    api_rows.append(row)
+            elif is_ats_host(host) or is_ats_host(p.get("url") or ""):
+                ddg_ats.append(p)
             else:
-                ddg_portals.append(p)
-            if len(combined) >= limit:
-                break
+                ddg_other.append(p)
 
-        # DuckDuckGo for portals without APIs (Instahyre, Wellfound, YC, …)
-        if len(combined) < limit and ddg_portals:
-            need = limit - len(combined)
-            batch_size = 4
-            batches = [
-                ddg_portals[i : i + batch_size]
-                for i in range(0, len(ddg_portals), batch_size)
-            ]
-            per_batch = max(2, (need + len(batches) - 1) // max(1, len(batches)))
-            for batch in batches:
-                if len(combined) >= limit:
+        async def _ddg(batch: List[Dict[str, str]], need: int) -> List[Dict[str, Any]]:
+            if not batch or need <= 0:
+                return []
+            hits: List[Dict[str, Any]] = []
+            chunk = 4
+            for i in range(0, len(batch), chunk):
+                if len(hits) >= need:
                     break
                 rows = await self._ddg_portal_batch(
-                    batch, search_term, location, per_batch
+                    batch[i : i + chunk],
+                    search_term,
+                    location,
+                    max(2, need - len(hits)),
                 )
                 for row in rows:
                     key = (row.get("url") or "").rstrip("/").lower()
                     if not key or key in seen:
                         continue
                     seen.add(key)
-                    combined.append(row)
-                    if len(combined) >= limit:
+                    hits.append(row)
+                    if len(hits) >= need:
                         break
+            return hits
 
+        # ATS career pages first (Tsenta-class Find), then API boards, then other portals
+        ats_need = min(max(4, limit // 3), limit)
+        ats_hits = await _ddg(ddg_ats, ats_need)
+        remaining = max(0, limit - len(ats_hits))
+        other_need = max(2, remaining // 3) if remaining else 0
+        other_hits = await _ddg(ddg_other, other_need)
+
+        combined = ats_hits + api_rows + other_hits
         logger.info(
-            "Vault portal search: %d portals (%d API/RSS-capable, %d DDG) → %d hits",
+            "Vault portal search: %d portals (ATS DDG %d, other DDG %d, API/RSS %d) → %d hits",
             len(portal_list),
-            len(portal_list) - len(ddg_portals),
-            len(ddg_portals),
+            len(ddg_ats),
+            len(ddg_other),
+            len(api_rows),
             len(combined),
         )
         return combined[:limit]
@@ -645,6 +686,15 @@ class JobDiscoveryAgent:
         live_jobs = await self.fetch_live_jobs(
             target_roles, is_remote, location_hubs, user_id=user_id
         )
+        work_auth = str(preferences.get("workAuthorization") or "").strip()
+        if work_auth in ("opt", "needs_sponsorship") and live_jobs:
+            filtered = [j for j in live_jobs if not _mentions_no_sponsor(j)]
+            if filtered:
+                live_jobs = filtered
+            else:
+                logger.info(
+                    "Work-auth filter would empty results — keeping unfiltered live jobs"
+                )
         source_meta = {str(j.get("id")): j for j in live_jobs}
 
         if not live_jobs:
@@ -668,8 +718,9 @@ class JobDiscoveryAgent:
             )
         jobs_context = (
             "Below are ACTUAL LIVE JOB POSTINGS primarily from your Vault job_portal "
-            "KBs (Instahyre, Wellfound, YC, WWR, …), with Remotive / RemoteOK / "
-            "Arbeitnow used only to fill remaining slots.\n"
+            "KBs — ATS career pages (Greenhouse, Lever, Ashby, Workday) first, then "
+            "Instahyre / Wellfound / YC / WWR, with Remotive / RemoteOK / Arbeitnow "
+            "used only to fill remaining slots.\n"
             "You MUST use these exact jobs (keep ID, Company, Title, URL, Source).\n"
             f"Score and return up to {getattr(settings, 'JOB_DISCOVERY_MAX_RESULTS', 15)} jobs.\n\n"
             + "\n---\n".join(formatted_jobs)
@@ -695,6 +746,9 @@ class JobDiscoveryAgent:
         6. Extract `contact_info` (recruiter email or name, if found).
         7. Set posted_at from Posted when available.
         8. CRITICAL: If the job appears EXPIRED, CLOSED, or is older than 30 days, discard it immediately.
+        9. Work authorization: if preferences.workAuthorization is "needs_sponsorship" or "opt",
+           deprioritize / discard roles that clearly say they do NOT sponsor visas.
+           If "citizen", prefer roles that require work authorization in that region.
         """
 
         messages = [

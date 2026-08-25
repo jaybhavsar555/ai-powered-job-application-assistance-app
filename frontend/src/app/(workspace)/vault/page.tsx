@@ -68,13 +68,19 @@ export default function VaultPage() {
     setError(null);
     setNotice(null);
     try {
-      const { data } = await api.post<{ created: number; skipped: number; total: number }>(
-        "/knowledge/me/seed-job-portals"
-      );
+      const { data } = await api.post<{
+        created: number;
+        skipped: number;
+        total: number;
+        ats_created?: number;
+      }>("/knowledge/me/seed-job-portals");
+      const ats = data.ats_created ?? 0;
       setNotice(
         data.created > 0
-          ? `Added ${data.created} job portals (${data.skipped} already present).`
-          : `All ${data.total} job portals already in your vault.`
+          ? `Added ${data.created} job portals${
+              ats ? ` (including ${ats} ATS career pages)` : ""
+            } — ${data.skipped} already present.`
+          : `All ${data.total} job portals already in your vault, including Greenhouse / Lever / Ashby / Workday.`
       );
       await fetchEntities();
     } catch (err: unknown) {
@@ -196,10 +202,10 @@ export default function VaultPage() {
         <p className="font-medium">How to use portals</p>
         <p className="text-muted-foreground">
           Open a portal → search → copy the job posting URL → Import on Jobs.
-          Per-site scrapers are not supported (boards block bots). Discovery
-          searches these Vault portal sites first (DuckDuckGo site: filter), then
-          fills with Remotive / RemoteOK / Arbeitnow for up to 15 scored matches.
-          Seed portals here so Discovery and manual Import stay aligned.
+          Discovery searches ATS career pages first (Greenhouse, Lever, Ashby,
+          Workday), then other Vault portals, then Remotive / RemoteOK /
+          Arbeitnow. Seed portals here so Find stays aligned. We do not crawl
+          50k company sites or silent-submit.
         </p>
         <div className="flex flex-wrap gap-2 pt-1">
           <Link

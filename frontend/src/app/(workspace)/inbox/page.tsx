@@ -112,8 +112,10 @@ interface InboxSummary {
   apply_mode?: string;
   apply_mode_note?: string;
   auto_consent?: boolean;
+  work_authorization?: string;
   auto_usage?: { hour_count?: number; day_count?: number };
   pipeline_steps?: PipelineStep[];
+  pipeline_stages?: { id: string; title: string; desc: string; href?: string }[];
   active_pipeline_step?: string;
   positioning?: { headline?: string };
   readiness?: DailyReadiness;
@@ -158,6 +160,7 @@ export default function InboxPage() {
   const [loading, setLoading] = useState(true);
   const [modeBusy, setModeBusy] = useState(false);
   const [modeError, setModeError] = useState<string | null>(null);
+  const [autoConfirmOpen, setAutoConfirmOpen] = useState(false);
   const token = useAuthStore((s) => s.token);
 
   const refresh = async () => {
@@ -205,6 +208,31 @@ export default function InboxPage() {
         const b = await res.json().catch(() => ({}));
         setModeError(
           typeof b.detail === "string" ? b.detail : "Failed to update apply mode"
+        );
+        return;
+      }
+      await refresh();
+    } finally {
+      setModeBusy(false);
+    }
+  };
+
+  const setWorkAuth = async (value: string) => {
+    setModeBusy(true);
+    setModeError(null);
+    try {
+      const res = await fetch("/api/v1/apply-prefs", {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ work_authorization: value }),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        setModeError(
+          typeof b.detail === "string" ? b.detail : "Failed to save work authorization"
         );
         return;
       }
@@ -262,16 +290,7 @@ export default function InboxPage() {
               <button
                 type="button"
                 disabled={modeBusy}
-                onClick={() => {
-                  if (
-                    !confirm(
-                      "Enable Auto Apply? Extension may click Submit on Greenhouse/Lever/Workday when confidence is high. LinkedIn stays blocked. Captchas pause the queue."
-                    )
-                  ) {
-                    return;
-                  }
-                  setApplyMode("auto_apply");
-                }}
+                onClick={() => setAutoConfirmOpen(true)}
                 className={`rounded-md px-3 py-2 text-xs font-medium border ${
                   isAuto
                     ? "bg-amber-600 text-white border-amber-600"
@@ -282,12 +301,60 @@ export default function InboxPage() {
               </button>
             </div>
           </div>
+          {autoConfirmOpen && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-3 text-sm space-y-2">
+              <p>
+                Enable gated Auto Apply? The extension may click Submit on
+                Greenhouse / Lever / Workday when confidence is high. LinkedIn
+                stays blocked. Captchas pause the queue. Career OS still does
+                not silent mass-submit.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={modeBusy}
+                  onClick={() => {
+                    setAutoConfirmOpen(false);
+                    void setApplyMode("auto_apply");
+                  }}
+                  className="rounded-md bg-amber-600 text-white px-3 py-1.5 text-xs font-medium disabled:opacity-50"
+                >
+                  Enable Auto Apply
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAutoConfirmOpen(false)}
+                  className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted"
+                >
+                  Keep Review &amp; Apply
+                </button>
+              </div>
+            </div>
+          )}
           {isAuto && summary?.auto_usage && (
             <p className="text-[11px] text-muted-foreground">
               Usage today: {summary.auto_usage.day_count ?? 0} · this hour:{" "}
               {summary.auto_usage.hour_count ?? 0}
             </p>
           )}
+          <label className="block space-y-1 pt-1">
+            <span className="text-xs font-medium">Work authorization</span>
+            <select
+              disabled={modeBusy}
+              value={summary?.work_authorization || ""}
+              onChange={(e) => setWorkAuth(e.target.value)}
+              className="w-full md:max-w-xs h-9 rounded-md border border-input bg-background px-2 text-sm"
+            >
+              <option value="">Not specified</option>
+              <option value="citizen">Citizen / no sponsorship needed</option>
+              <option value="opt">OPT / STEM-OPT</option>
+              <option value="needs_sponsorship">Need visa sponsorship</option>
+              <option value="other">Other</option>
+            </select>
+            <span className="text-[11px] text-muted-foreground">
+              Used on ATS work-auth questions and Discovery (skip “no sponsor” roles).
+            </span>
+          </label>
         </div>
       )}
 
@@ -454,6 +521,42 @@ export default function InboxPage() {
               <PlusCircle className="h-4 w-4" />
               Import URL
             </Link>
+          </div>
+        </section>
+      )}
+
+      {/* Tsenta-style four stages (Career OS still Review & Apply) */}
+      {(summary?.pipeline_stages || []).length > 0 && (
+        <section className="rounded-xl border bg-card p-5 md:p-6 shadow-sm">
+          <h2 className="text-lg font-semibold mb-1">Four stages. You stay in the loop.</h2>
+          <p className="text-xs text-muted-foreground mb-4">
+            Same Find → Prep → Apply → Track story as career-page appliers — we
+            do not silent-submit. Diff + receipt before anything goes out in your name.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {(summary?.pipeline_stages || []).map((st, i) => {
+              const inner = (
+                <>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {String(i + 1).padStart(2, "0")} · {st.title}
+                  </p>
+                  <p className="text-sm text-muted-foreground leading-snug">
+                    {st.desc}
+                  </p>
+                </>
+              );
+              const cls =
+                "rounded-lg border bg-muted/20 p-3 space-y-1 block hover:border-primary/40 transition-colors";
+              return st.href ? (
+                <Link key={st.id} href={st.href} className={cls}>
+                  {inner}
+                </Link>
+              ) : (
+                <div key={st.id} className={cls}>
+                  {inner}
+                </div>
+              );
+            })}
           </div>
         </section>
       )}

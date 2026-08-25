@@ -19,6 +19,10 @@ class ApplyPrefsUpdate(BaseModel):
     )
     auto_consent: Optional[bool] = None
     min_confidence: Optional[float] = Field(None, ge=0.5, le=1.0)
+    work_authorization: Optional[str] = Field(
+        None,
+        description="citizen | opt | needs_sponsorship | other",
+    )
 
 
 class ExtensionEventIn(BaseModel):

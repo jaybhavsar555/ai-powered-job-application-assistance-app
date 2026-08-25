@@ -24,7 +24,6 @@ from app.infrastructure.db.models import DBApplication, DBJob, DBUser
 from app.infrastructure.resume_library import (
     detect_role_family,
     extract_text,
-    list_resume_files,
     parse_contact,
     pick_base_resume,
 )
@@ -159,37 +158,142 @@ class ApplySessionService:
             raise HTTPException(status_code=404, detail="Application not found")
         return app
 
-    def _docs_payload(self, state: dict[str, Any], job: Optional[DBJob]) -> dict[str, Any]:
+    def _library_resume_text(
+        self, job: Optional[DBJob]
+    ) -> tuple[bool, str]:
+        """Return (attached, extracted text) from the on-disk resume library."""
+        try:
+            source = Path(self.settings.RESUME_SOURCE_DIR) if self.settings.RESUME_SOURCE_DIR else None
+            if not source or not source.exists():
+                return False, ""
+            role_title = job.role_title if job else ""
+            jd = (job.description_raw or "") if job else ""
+            family = detect_role_family(role_title or "", jd)
+            base = pick_base_resume(source, family)
+            if not base:
+                return False, ""
+            return True, extract_text(base.path)
+        except Exception:
+            return False, ""
+
+    def _docs_payload(
+        self,
+        state: dict[str, Any],
+        job: Optional[DBJob],
+        *,
+        resume_text: str = "",
+    ) -> dict[str, Any]:
         package = state.get("apply_package") or state.get("package") or {}
         if not isinstance(package, dict):
             package = {}
         tailored = state.get("tailored_resume") or {}
+        if not isinstance(tailored, dict):
+            tailored = {}
         cover = state.get("cover_letter") or ""
         if isinstance(cover, dict):
             cover = cover.get("content") or cover.get("body") or ""
         matching = state.get("matching_skills") or []
         missing = state.get("missing_skills") or []
+        if not isinstance(matching, list):
+            matching = []
+        if not isinstance(missing, list):
+            missing = []
         ats = state.get("ats_score")
+        normalized = (job.description_normalized or {}) if job else {}
+        jd_skills = normalized.get("required_skills") or []
+        if not isinstance(jd_skills, list):
+            jd_skills = []
+        required = [str(s) for s in (jd_skills or matching or []) if s][:16]
+        if not required:
+            required = [str(s) for s in matching[:12]]
+        present = [s for s in required if s in matching or s.lower() in " ".join(matching).lower()]
+        if matching and not present:
+            present = [str(s) for s in matching[:12]]
+        summary = str(tailored.get("summary") or "").strip()
+        bullets = tailored.get("tailored_bullets") or tailored.get("bullets") or []
+        if not isinstance(bullets, list):
+            bullets = []
+        resume_body = summary
+        if bullets:
+            resume_body = (summary + "\n\n" if summary else "") + "\n".join(
+                f"• {b}" for b in bullets if b
+            )
+        if not resume_body and resume_text:
+            resume_body = resume_text[:8000]
+        keywords = tailored.get("added_keywords") or []
+        cover_full = str(cover).strip()
+        jd_text = ((job.description_raw or "") if job else "")[:8000]
         return {
             "ats_score": ats,
-            "matching_skills": matching[:8] if isinstance(matching, list) else [],
-            "missing_skills": missing[:8] if isinstance(missing, list) else [],
+            "matching_skills": matching[:12],
+            "missing_skills": missing[:12],
+            "required_skills": required[:16],
+            "present_skills": present[:16],
+            "required_skill_count": len(required) or len(matching) + len(missing),
+            "present_skill_count": len(present) or len(matching),
             "has_tailored_resume": bool(tailored),
-            "has_cover_letter": bool(str(cover).strip()),
-            "cover_letter_preview": (str(cover).strip()[:480] + ("…" if len(str(cover).strip()) > 480 else ""))
-            if cover
+            "has_cover_letter": bool(cover_full),
+            "cover_letter": cover_full,
+            "cover_letter_preview": (cover_full[:480] + ("…" if len(cover_full) > 480 else ""))
+            if cover_full
             else None,
+            "resume_preview": resume_body[:8000] or None,
+            "added_keywords": [str(k) for k in keywords[:16]] if isinstance(keywords, list) else [],
+            "job_description": jd_text or None,
             "package": package or None,
             "package_ready": bool(package.get("folder") or package.get("files")),
+            "resume_download_kind": "resume_pdf" if package else None,
+            "cover_download_kind": "cover_pdf" if package else None,
             "canvas_href": f"/canvas?job_id={job.id}" if job else "/canvas",
             "approvals_href": "/approvals",
             "jobs_href": "/jobs",
             "hint": (
-                "Docs ready — approve this step, then open the employer site."
-                if package or tailored or cover
-                else "No tailored package yet. Open Canvas to generate resume/cover, or approve to continue with your master resume."
+                "Docs ready — review the form, then submit on the employer site."
+                if package or tailored or cover_full
+                else "No tailored package yet. Open Canvas to generate resume/cover, or continue with your master resume."
             ),
         }
+
+    def _experience_from_resume(self, text: str) -> list[dict[str, str]]:
+        """Best-effort work-history blocks for the review form (not a full parser)."""
+        if not text:
+            return []
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        jobs: list[dict[str, str]] = []
+        month = (
+            r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+            r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|"
+            r"Dec(?:ember)?)"
+        )
+        date_re = re.compile(rf"{month}\s+\d{{4}}\s*[-–—]\s*(?:{month}\s+\d{{4}}|Present|Current)", re.I)
+        for i, ln in enumerate(lines):
+            if len(jobs) >= 6:
+                break
+            if "|" in ln and 8 < len(ln) < 90:
+                left, right = [p.strip() for p in ln.split("|", 1)]
+                nxt = lines[i + 1] if i + 1 < len(lines) else ""
+                dates = nxt if date_re.search(nxt) else ""
+                jobs.append(
+                    {
+                        "company": left[:80],
+                        "title": right[:80],
+                        "dates": dates[:40],
+                    }
+                )
+            elif date_re.search(ln) and i > 0:
+                prev = lines[i - 1]
+                if 4 < len(prev) < 90 and not any(j["title"] == prev for j in jobs):
+                    jobs.append({"company": "", "title": prev[:80], "dates": ln[:40]})
+        # Dedupe
+        seen: set[str] = set()
+        out: list[dict[str, str]] = []
+        for j in jobs:
+            key = f"{j.get('company')}|{j.get('title')}".lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(j)
+        return out[:5]
 
     async def _profile_fields(self, user: DBUser, job: Optional[DBJob]) -> list[dict[str, Any]]:
         name = _name_from_email(user.email)
@@ -197,76 +301,172 @@ class ApplySessionService:
         phone = ""
         location = ""
         linkedin = ""
+        resume_text = ""
+        resume_attached = False
+        work_auth = ""
 
         try:
-            source = Path(self.settings.RESUME_SOURCE_DIR) if self.settings.RESUME_SOURCE_DIR else None
-            if source and source.exists():
-                role_title = job.role_title if job else ""
-                jd = (job.description_raw or "") if job else ""
-                family = detect_role_family(role_title or "", jd)
-                base = pick_base_resume(source, family)
-                if base:
-                    text = extract_text(base.path)
-                    parsed_name, contact = parse_contact(text)
-                    if parsed_name and parsed_name.lower() != "candidate":
-                        name = parsed_name
-                    parts = [
-                        p.strip()
-                        for p in (contact or "").replace("|", ",").split(",")
-                        if p.strip()
-                    ]
-                    for p in parts:
-                        if "@" in p:
-                            email = p
-                        elif re.search(r"\d{8,}", re.sub(r"\D", "", p)) or any(
-                            c.isdigit() for c in p
-                        ):
-                            if sum(c.isdigit() for c in p) >= 8:
-                                phone = p
-                        elif "linkedin.com" in p.lower():
-                            linkedin = p
-                        elif not location and len(p) < 60:
-                            location = p
+            from app.application.services.apply_prefs import ApplyPrefsService
+
+            prefs = await ApplyPrefsService(self.db).get(user.id)
+            work_auth = str(prefs.get("work_authorization") or "")
         except Exception:
-            pass
+            work_auth = ""
+
+        resume_attached, resume_text = self._library_resume_text(job)
+        if resume_text:
+            parsed_name, contact = parse_contact(resume_text)
+            if parsed_name and parsed_name.lower() != "candidate":
+                name = parsed_name
+            parts = [
+                p.strip()
+                for p in (contact or "").replace("|", ",").split(",")
+                if p.strip()
+            ]
+            for p in parts:
+                if "@" in p:
+                    email = p
+                elif re.search(r"\d{8,}", re.sub(r"\D", "", p)) or any(
+                    c.isdigit() for c in p
+                ):
+                    if sum(c.isdigit() for c in p) >= 8:
+                        phone = p
+                elif "linkedin.com" in p.lower():
+                    linkedin = p
+                elif not location and len(p) < 60:
+                    location = p
 
         if not location and job:
             location = str((job.description_normalized or {}).get("location") or "")
 
-        return [
-            {"key": "full_name", "label": "Full name", "value": name, "status": "ready"},
-            {"key": "email", "label": "Email", "value": email, "status": "ready"},
+        parts = [p for p in re.split(r"\s+", name.strip()) if p]
+        first = parts[0] if parts else "Candidate"
+        last = " ".join(parts[1:]) if len(parts) > 1 else ""
+        auth_label = {
+            "citizen": "Authorized — no sponsorship needed",
+            "opt": "OPT / STEM-OPT",
+            "needs_sponsorship": "Will need visa sponsorship",
+            "other": "See Screening Q&A",
+        }.get(work_auth, "Answer honestly on their form (Screening Q&A)")
+
+        fields: list[dict[str, Any]] = [
+            {
+                "key": "first_name",
+                "label": "First Name",
+                "value": first,
+                "status": "ready",
+                "locked": False,
+                "group": "personal",
+            },
+            {
+                "key": "last_name",
+                "label": "Last Name",
+                "value": last,
+                "status": "ready",
+                "locked": False,
+                "group": "personal",
+            },
+            {
+                "key": "email",
+                "label": "Email",
+                "value": email,
+                "status": "ready",
+                "locked": True,
+                "group": "personal",
+                "hint": "Locked from your account. Change it in Profile / login email.",
+            },
             {
                 "key": "phone",
                 "label": "Phone",
-                "value": phone or "Add on form if required",
+                "value": phone or "",
                 "status": "ready" if phone else "manual",
+                "locked": True,
+                "group": "personal",
+                "hint": "Locked from your resume. Edit the file in Resume Studio if needed.",
+            },
+            {
+                "key": "resume",
+                "label": "Resume",
+                "value": "Resume attached" if resume_attached else "No resume in library",
+                "status": "ready" if resume_attached else "manual",
+                "locked": True,
+                "group": "personal",
             },
             {
                 "key": "linkedin",
                 "label": "LinkedIn / portfolio",
-                "value": linkedin or "Paste from Vault / profile if asked",
+                "value": linkedin,
                 "status": "ready" if linkedin else "manual",
+                "locked": False,
+                "group": "personal",
             },
             {
                 "key": "location",
-                "label": "Location / work auth",
-                "value": location or "Confirm on form",
+                "label": "Location",
+                "value": location,
                 "status": "review" if location else "manual",
+                "locked": False,
+                "group": "personal",
             },
             {
                 "key": "work_auth",
                 "label": "Work authorization",
-                "value": "Answer honestly on their form (see Screening Q&A)",
-                "status": "manual",
-            },
-            {
-                "key": "salary",
-                "label": "Salary expectation",
-                "value": "Optional — use your range if asked",
-                "status": "manual",
+                "value": auth_label,
+                "status": "ready" if work_auth else "manual",
+                "locked": True,
+                "group": "personal",
+                "hint": "Set on Inbox → Work authorization.",
             },
         ]
+        for i, exp in enumerate(self._experience_from_resume(resume_text), start=1):
+            title = exp.get("title") or "Role"
+            company = exp.get("company") or ""
+            dates = exp.get("dates") or ""
+            label = f"Work Experience {i}"
+            value = " · ".join([p for p in (title, company, dates) if p])
+            fields.append(
+                {
+                    "key": f"experience_{i}",
+                    "label": label,
+                    "value": value,
+                    "status": "ready",
+                    "locked": False,
+                    "group": "experience",
+                    "company": company,
+                    "title": title,
+                    "dates": dates,
+                }
+            )
+        return fields
+
+    async def update_fields(
+        self,
+        user_id: UUID,
+        application_id: UUID,
+        updates: dict[str, str],
+    ) -> dict[str, Any]:
+        app = await self._load_app(user_id, application_id)
+        state = copy.deepcopy(dict(app.workflow_state or {}))
+        session = state.get("apply_session")
+        if not session:
+            raise HTTPException(status_code=404, detail="No apply session")
+        fields = list(session.get("form_fields") or [])
+        allowed = {f.get("key") for f in fields if not f.get("locked")}
+        for key, value in (updates or {}).items():
+            if key not in allowed:
+                continue
+            limit = 400 if str(key).startswith("experience_") else 200
+            for f in fields:
+                if f.get("key") == key:
+                    f["value"] = str(value)[:limit]
+                    f["status"] = "ready" if str(value).strip() else "manual"
+        session["form_fields"] = fields
+        session["updated_at"] = _utc_now().isoformat()
+        self._save_session(app, session)
+        await self.db.commit()
+        await self.db.refresh(app)
+        session = (app.workflow_state or {}).get("apply_session") or session
+        return self._serialize(app, session)
 
     def _serialize(self, app: DBApplication, session: dict[str, Any]) -> dict[str, Any]:
         job = app.job
@@ -277,7 +477,7 @@ class ApplySessionService:
             "job_id": str(app.job_id),
             "mode": "review_and_apply",
             "mode_note": (
-                "Like Optim Hire Review & Apply: we prepare fields and walk the form; "
+                "Review & Apply: we prepare fields and a receipt; "
                 "you approve each step and click Submit on the employer site."
             ),
             "status": session.get("status", "active"),
@@ -287,10 +487,16 @@ class ApplySessionService:
             "job_url": job.url if job else None,
             "steps": session.get("steps", []),
             "form_fields": session.get("form_fields", []),
+            "receipt": session.get("receipt"),
             "package": session.get("package"),
             "docs": session.get("docs") or self._docs_payload(state, job),
             "browser": session.get("browser", {}),
             "updated_at": session.get("updated_at"),
+            "experience": [
+                f
+                for f in (session.get("form_fields") or [])
+                if f.get("group") == "experience"
+            ],
         }
 
     def _ensure_step_statuses(self, session: dict[str, Any]) -> None:
@@ -341,17 +547,37 @@ class ApplySessionService:
 
         state = copy.deepcopy(dict(app.workflow_state or {}))
         existing = state.get("apply_session")
+        _, library_text = self._library_resume_text(app.job)
         form_fields = await self._profile_fields(user, app.job)
-        docs = self._docs_payload(state, app.job)
+        docs = self._docs_payload(state, app.job, resume_text=library_text)
 
         if (
             not reset
             and isinstance(existing, dict)
-            and existing.get("status") in ("active", "awaiting_submit_confirm")
+            and existing.get("status")
+            in ("active", "awaiting_submit_confirm", "completed")
             and existing.get("steps")
         ):
-            self._ensure_step_statuses(existing)
-            existing["form_fields"] = form_fields
+            if existing.get("status") != "completed":
+                self._ensure_step_statuses(existing)
+                old_by_key = {
+                    f.get("key"): f for f in (existing.get("form_fields") or [])
+                }
+                merged = []
+                for f in form_fields:
+                    old = old_by_key.get(f.get("key"))
+                    if (
+                        old
+                        and not f.get("locked")
+                        and str(old.get("value") or "").strip()
+                    ):
+                        f = {
+                            **f,
+                            "value": old.get("value"),
+                            "status": old.get("status") or f.get("status"),
+                        }
+                    merged.append(f)
+                existing["form_fields"] = merged
             existing["docs"] = docs
             existing["package"] = docs.get("package")
             existing["updated_at"] = _utc_now().isoformat()
@@ -398,6 +624,11 @@ class ApplySessionService:
         session = (app.workflow_state or {}).get("apply_session")
         if not session:
             raise HTTPException(status_code=404, detail="No apply session — start one first")
+        session = copy.deepcopy(session)
+        _, library_text = self._library_resume_text(app.job)
+        session["docs"] = self._docs_payload(
+            app.workflow_state or {}, app.job, resume_text=library_text
+        )
         return self._serialize(app, session)
 
     async def approve_step(
@@ -550,25 +781,41 @@ class ApplySessionService:
             raise HTTPException(status_code=404, detail="No apply session")
 
         steps = session.get("steps") or []
-        approved_ids = {s["id"] for s in steps if s.get("status") == "approved"}
-        required = {"review_match", "open_site", "fill_form", "attach_resume"}
-        missing = required - approved_ids
-        if missing and session.get("status") == "active":
-            current = steps[int(session.get("current_step_index", 0))]
-            if current.get("id") != "submit_confirm":
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Approve remaining steps first: {', '.join(sorted(missing))}",
-                )
-
+        now = _utc_now().isoformat()
+        # Review-form Submit: auto-approve remaining HITL gates (user reviewed the mapped form)
         for s in steps:
-            if s.get("id") == "submit_confirm":
+            if s.get("status") != "approved":
                 s["status"] = "approved"
-                s["approved_at"] = _utc_now().isoformat()
-
+                s["approved_at"] = now
         session["steps"] = steps
+        session["current_step_index"] = max(len(steps) - 1, 0)
         session["status"] = "completed"
         session["completed_at"] = _utc_now().isoformat()
+        fields = list(session.get("form_fields") or [])
+        docs = session.get("docs") or {}
+        pkg = docs.get("package") if isinstance(docs.get("package"), dict) else {}
+        session["receipt"] = {
+            "submitted_at": session["completed_at"],
+            "company": _company(app.job),
+            "role_title": _display_role(app.job),
+            "job_url": app.job.url if app.job else None,
+            "fields": [
+                {"label": f.get("label"), "value": f.get("value"), "status": f.get("status")}
+                for f in fields
+            ],
+            "field_count": len(fields),
+            "filled_count": sum(
+                1
+                for f in fields
+                if str(f.get("value") or "").strip()
+                and f.get("status") in ("filled", "ready", "review")
+            ),
+            "resume": pkg.get("folder")
+            or ("tailored" if docs.get("has_tailored_resume") else "library"),
+            "ats_score": docs.get("ats_score"),
+            "cover_letter": bool(docs.get("has_cover_letter")),
+            "note": "You confirmed Submit on the employer site. Career OS did not silent-submit.",
+        }
         session["browser"] = {
             **(session.get("browser") or {}),
             "last_action": "user_confirmed_submit",
