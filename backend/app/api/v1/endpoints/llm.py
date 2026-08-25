@@ -33,6 +33,68 @@ async def get_llm_telemetry(current_user: User = Depends(get_current_user)):
     return telemetry_snapshot()
 
 
+@router.get("/model-presets")
+async def list_model_presets(current_user: User = Depends(get_current_user)):
+    """
+    Recommended local / open models for Career OS agents.
+    See docs/local_llm_models.md.
+    """
+    return {
+        "presets": [
+            {
+                "provider": "ollama",
+                "model": "qwen2.5:7b",
+                "label": "Qwen 2.5 7B (local)",
+                "notes": "Best default for laptop/desktop with 8GB+ RAM. Fully offline.",
+                "pull": "ollama pull qwen2.5:7b",
+            },
+            {
+                "provider": "ollama",
+                "model": "qwen2.5:3b",
+                "label": "Qwen 2.5 3B (light)",
+                "notes": "CPU-friendly; default in Docker Compose.",
+                "pull": "ollama pull qwen2.5:3b",
+            },
+            {
+                "provider": "ollama",
+                "model": "llama3.1:8b",
+                "label": "Llama 3.1 8B (local)",
+                "notes": "Strong general English for scoring and drafts.",
+                "pull": "ollama pull llama3.1:8b",
+            },
+            {
+                "provider": "ollama",
+                "model": "deepseek-r1:8b",
+                "label": "DeepSeek R1 8B (local)",
+                "notes": "Reasoning-heavy evaluations; slower.",
+                "pull": "ollama pull deepseek-r1:8b",
+            },
+            {
+                "provider": "tokenharbor",
+                "model": "kimi-k3:free",
+                "label": "Kimi K3 free (Token Harbor)",
+                "notes": "Kimi-class without multi-GPU. Needs TOKENHARBOR_API_KEY.",
+                "pull": None,
+            },
+            {
+                "provider": "tokenharbor",
+                "model": "deepseek-v4-flash:free",
+                "label": "DeepSeek V4 Flash free",
+                "notes": "Fast structured JSON via Token Harbor.",
+                "pull": None,
+            },
+            {
+                "provider": "ollama",
+                "model": "kimi-k2.6:cloud",
+                "label": "Kimi K2.6 via Ollama Cloud",
+                "notes": "Not local — ollama signin required; weights stay remote.",
+                "pull": "ollama run kimi-k2.6:cloud",
+            },
+        ],
+        "docs": "docs/local_llm_models.md",
+    }
+
+
 @router.put("/provider")
 async def update_llm_provider(
     data: LlmProviderUpdate,

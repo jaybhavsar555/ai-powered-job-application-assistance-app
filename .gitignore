@@ -48,4 +48,6 @@ data/resumes/*
 !data/resumes/.gitkeep
 data/packages/*
 !data/packages/.gitkeep
-
+data/pipelines/*
+!data/pipelines/README.md
+!data/pipelines/.gitkeep

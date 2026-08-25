@@ -101,11 +101,16 @@ class Settings(BaseSettings):
     )
     AUTO_APPLY_BLOCKLIST: str = "linkedin.com,www.linkedin.com"
 
-    # Discovery: Vault job_portal KBs first; Remotive/RemoteOK/Arbeitnow fill gaps
-    JOB_DISCOVERY_SOURCES: str = "vault_portals,remotive,remoteok,arbeitnow"
+    # Discovery: Vault portals → boards → open-web search (career-ops /ai-job-search style)
+    JOB_DISCOVERY_SOURCES: str = (
+        "vault_portals,remotive,remoteok,arbeitnow,web_search"
+    )
     JOB_DISCOVERY_PER_SOURCE: int = 3
     JOB_DISCOVERY_VAULT_LIMIT: int = 12
-    JOB_DISCOVERY_MAX_RESULTS: int = 15
+    JOB_DISCOVERY_WEB_LIMIT: int = 8
+    JOB_DISCOVERY_MAX_RESULTS: int = 20
+    # File-backed Search Pipeline runs (approve-at-each-gate)
+    SEARCH_PIPELINE_DIR: str = "./data/pipelines"
 
     model_config = SettingsConfigDict(
         env_file=".env",
