@@ -18,6 +18,16 @@ from app.application.services.resume_studio import ResumeStudioService
 router = APIRouter()
 
 
+def _resume_fields_from_payload(payload: dict, user: User) -> tuple[str, str, str, list[str], list[str], Optional[str]]:
+    user_name = str(payload.get("user_name") or user.email.split("@")[0].capitalize())
+    contact_info = str(payload.get("contact_info") or user.email)
+    summary = str(payload.get("summary") or "")
+    bullets = list(payload.get("tailored_bullets") or [])
+    skills = list(payload.get("added_keywords") or [])
+    base_excerpt = payload.get("base_excerpt")
+    return user_name, contact_info, summary, bullets, skills, base_excerpt
+
+
 class ApplyPackageRequest(BaseModel):
     application_id: Optional[UUID] = None
     job_id: Optional[UUID] = None
@@ -36,19 +46,89 @@ async def export_resume_docx(
     Takes an OptimizedResume JSON payload and compiles it into a downloadable .docx file.
     """
     generator = DocumentGenerator()
+    user_name, contact_info, summary, bullets, skills, base_excerpt = _resume_fields_from_payload(
+        payload, current_user
+    )
 
-    user_name = current_user.email.split("@")[0].capitalize()
-    contact_info = current_user.email
-
-    summary = payload.get("summary", "")
-    bullets = payload.get("tailored_bullets", [])
-
-    file_stream = generator.generate_docx(user_name, contact_info, summary, bullets)
+    file_stream = generator.generate_resume_docx(
+        user_name, contact_info, summary, bullets, skills=skills, base_excerpt=base_excerpt
+    )
 
     return StreamingResponse(
         file_stream,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f"attachment; filename={user_name}_Resume.docx"},
+    )
+
+
+@router.post("/export/pdf")
+async def export_resume_pdf(
+    payload: dict = Body(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Compile tailored resume to ATS-friendly PDF (LaTeX first, ReportLab fallback)."""
+    generator = DocumentGenerator()
+    user_name, contact_info, summary, bullets, skills, base_excerpt = _resume_fields_from_payload(
+        payload, current_user
+    )
+
+    file_stream, _ = generator.generate_resume_pdf(
+        user_name, contact_info, summary, bullets, skills=skills, base_excerpt=base_excerpt
+    )
+
+    return StreamingResponse(
+        file_stream,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={user_name}_Resume.pdf"},
+    )
+
+
+@router.post("/export/tex")
+async def export_resume_tex(
+    payload: dict = Body(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Return editable LaTeX source for the tailored resume (compile locally or re-upload)."""
+    generator = DocumentGenerator()
+    user_name, contact_info, summary, bullets, skills, base_excerpt = _resume_fields_from_payload(
+        payload, current_user
+    )
+
+    tex_content = generator.generate_resume_latex(
+        user_name, contact_info, summary, bullets, skills=skills, base_excerpt=base_excerpt
+    )
+
+    return StreamingResponse(
+        iter([tex_content.encode("utf-8")]),
+        media_type="application/x-tex",
+        headers={"Content-Disposition": f"attachment; filename={user_name}_Resume.tex"},
+    )
+
+
+class CompileTexRequest(BaseModel):
+    tex_content: str = Field(..., min_length=1, max_length=120_000)
+    filename: str = Field(default="Tailored_Resume")
+
+
+@router.post("/compile/tex")
+async def compile_tex_to_pdf(
+    body: CompileTexRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Compile edited LaTeX source to PDF (in-browser editor round-trip)."""
+    generator = DocumentGenerator()
+    try:
+        pdf_stream = generator.compile_tex(body.tex_content)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    safe_name = "".join(c for c in body.filename if c.isalnum() or c in "._-") or "Resume"
+    return StreamingResponse(
+        pdf_stream,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={safe_name}.pdf"},
     )
 
 
@@ -101,6 +181,7 @@ async def download_package_file(
     path = await studio.resolve_package_file(current_user.id, application_id, kind)
     media = {
         "resume_pdf": "application/pdf",
+        "resume_tex": "application/x-tex",
         "cover_pdf": "application/pdf",
         "resume_docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "cover_docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

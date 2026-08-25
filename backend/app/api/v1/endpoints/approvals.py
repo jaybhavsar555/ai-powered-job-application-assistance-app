@@ -11,8 +11,6 @@ from app.schemas.approval import (
     ApprovalReevaluateResponse
 )
 from app.application.services.approval import ApprovalService
-from app.application.agents.ats_analyzer import ATSAnalyzerAgent
-import json
 
 router = APIRouter()
 
@@ -36,8 +34,11 @@ async def reevaluate_approval(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Re-evaluate ATS score for a manually edited resume.
+    Re-evaluate ATS score for a manually edited resume (unified ATS + parser checks).
     """
+    from app.application.services.ats_service import ATSService
+    from app.application.services.resume_parser import structured_resume_to_text
+
     job_result = await db.execute(
         select(DBJob).where(DBJob.id == data.job_id, DBJob.user_id == current_user.id)
     )
@@ -45,16 +46,18 @@ async def reevaluate_approval(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    resume_text = json.dumps(data.tailored_resume)
-    
-    agent = ATSAnalyzerAgent()
-    result = await agent.run({
-        "resume_json": resume_text,
-        "job_description": job.description_raw
-    })
-    
-    ats_data = result.get("ats_score", {})
-    return ApprovalReevaluateResponse(
-        ats_score=ats_data.get("score", 0),
-        evidence=f"Re-evaluated match score: {ats_data.get('score', 0)}/100. " + ats_data.get("recommendation", "")
+    resume_text = structured_resume_to_text(data.tailored_resume or {})
+    ats_service = ATSService()
+    unified = await ats_service.analyze(
+        resume_text,
+        job.description_raw or "",
+        structured_content=data.tailored_resume,
     )
+    evidence = (
+        f"Re-evaluated match score: {unified.score}/100 "
+        f"(LLM {unified.llm_score}, parser {unified.parser_score}). "
+        f"{unified.recommendation}"
+    )
+    if unified.parser_checks.warnings:
+        evidence += " Warnings: " + "; ".join(unified.parser_checks.warnings[:2])
+    return ApprovalReevaluateResponse(ats_score=unified.score, evidence=evidence)

@@ -22,7 +22,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 router = APIRouter()
 
-PACKAGE_KINDS = ("resume_pdf", "resume_docx", "cover_pdf", "cover_docx")
+PACKAGE_KINDS = ("resume_pdf", "resume_docx", "resume_tex", "cover_pdf", "cover_docx")
 
 
 def _package_exists(app: Optional[DBApplication]) -> bool:

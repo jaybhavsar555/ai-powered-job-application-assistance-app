@@ -95,6 +95,53 @@ class DocumentGenerator:
                 user_name, contact_info, summary, bullets, skills, base_excerpt
             ), None
 
+    def generate_resume_latex(
+        self,
+        user_name: str,
+        contact_info: str,
+        summary: str,
+        bullets: list[str],
+        skills: Optional[list[str]] = None,
+        base_excerpt: Optional[str] = None,
+    ) -> str:
+        """Render ATS-oriented LaTeX source (editable before PDF compile)."""
+        return self._render_resume_latex(
+            user_name, contact_info, summary, bullets, skills, base_excerpt
+        )
+
+    def _render_resume_latex(
+        self,
+        user_name: str,
+        contact_info: str,
+        summary: str,
+        bullets: list[str],
+        skills: Optional[list[str]] = None,
+        base_excerpt: Optional[str] = None,
+    ) -> str:
+        import os
+
+        from jinja2 import Template
+
+        template_path = os.path.join(
+            os.path.dirname(__file__), "..", "templates", "resume_template.tex"
+        )
+        with open(template_path, "r", encoding="utf-8") as f:
+            template_str = f.read()
+
+        template = Template(template_str)
+        return template.render(
+            user_name=self._escape_latex(user_name),
+            contact_info=self._escape_latex(contact_info or ""),
+            summary=self._escape_latex(summary or ""),
+            bullets=[self._escape_latex(b) for b in (bullets or [])],
+            skills=self._escape_latex(", ".join(skills) if skills else ""),
+            base_excerpt_blocks=[
+                self._escape_latex(b) for b in self._split_blocks(base_excerpt, limit=10)
+            ]
+            if base_excerpt
+            else [],
+        )
+
     def _generate_resume_pdf_latex(
         self,
         user_name: str,
@@ -109,29 +156,11 @@ class DocumentGenerator:
         import subprocess
         import tempfile
 
-        from jinja2 import Template
-
         if not shutil.which("pdflatex"):
             raise RuntimeError("pdflatex not found on PATH")
 
-        template_path = os.path.join(
-            os.path.dirname(__file__), "..", "templates", "resume_template.tex"
-        )
-        with open(template_path, "r", encoding="utf-8") as f:
-            template_str = f.read()
-
-        template = Template(template_str)
-        tex_content = template.render(
-            user_name=self._escape_latex(user_name),
-            contact_info=self._escape_latex(contact_info or ""),
-            summary=self._escape_latex(summary or ""),
-            bullets=[self._escape_latex(b) for b in (bullets or [])],
-            skills=self._escape_latex(", ".join(skills) if skills else ""),
-            base_excerpt_blocks=[
-                self._escape_latex(b) for b in self._split_blocks(base_excerpt, limit=10)
-            ]
-            if base_excerpt
-            else [],
+        tex_content = self._render_resume_latex(
+            user_name, contact_info, summary, bullets, skills, base_excerpt
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -161,6 +190,59 @@ class DocumentGenerator:
         stream = io.BytesIO(pdf_data)
         stream.seek(0)
         return stream, tex_content
+
+    _DISALLOWED_TEX = re.compile(
+        r"\\(?:input|include|write18|immediate|openout|write|ShellEscape|usepackage\s*\{[^}]*write)",
+        re.I,
+    )
+
+    def validate_tex(self, tex_content: str) -> None:
+        if not (tex_content or "").strip():
+            raise ValueError("LaTeX content is empty")
+        if len(tex_content) > 120_000:
+            raise ValueError("LaTeX content exceeds 120KB limit")
+        if self._DISALLOWED_TEX.search(tex_content):
+            raise ValueError(
+                "LaTeX content contains disallowed commands (input/include/write18)"
+            )
+
+    def compile_tex(self, tex_content: str) -> io.BytesIO:
+        """Compile user-edited LaTeX to PDF via pdflatex."""
+        import os
+        import shutil
+        import subprocess
+        import tempfile
+
+        self.validate_tex(tex_content)
+        if not shutil.which("pdflatex"):
+            raise RuntimeError("pdflatex not found on PATH")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tex_file = os.path.join(temp_dir, "resume.tex")
+            with open(tex_file, "w", encoding="utf-8") as f:
+                f.write(tex_content)
+
+            for _ in range(2):
+                result = subprocess.run(
+                    ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "resume.tex"],
+                    cwd=temp_dir,
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                if result.returncode != 0:
+                    err = (result.stderr or result.stdout or b"").decode("utf-8", errors="ignore")
+                    raise RuntimeError(f"pdflatex failed: {err[-2500:]}")
+
+            pdf_file = os.path.join(temp_dir, "resume.pdf")
+            if not os.path.exists(pdf_file):
+                raise RuntimeError("pdflatex completed but resume.pdf was not produced")
+            with open(pdf_file, "rb") as f:
+                pdf_data = f.read()
+
+        stream = io.BytesIO(pdf_data)
+        stream.seek(0)
+        return stream
 
     def _generate_resume_pdf_reportlab(
         self,

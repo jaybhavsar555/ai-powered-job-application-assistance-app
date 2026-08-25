@@ -2,21 +2,55 @@
 
 from __future__ import annotations
 
+import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
+from app.application.services.ats_service import ATSService
+from app.application.services.resume_parser import structured_resume_to_text
 from app.core.config import get_settings
 from app.infrastructure.db.models import DBApplication, DBJob, DBResumeVersion
 from app.infrastructure.resume_library import extract_text
 
 
-PACKAGE_KINDS = ("resume_pdf", "resume_docx", "cover_pdf", "cover_docx")
+PACKAGE_KINDS = ("resume_pdf", "resume_docx", "resume_tex", "cover_pdf", "cover_docx")
+
+
+def _guess_role_title(job_description: str, override: Optional[str] = None) -> str:
+    if override and override.strip():
+        return override.strip()[:120]
+    jd = job_description or ""
+    for pattern in (
+        r"(?:role|position|title)\s*[:\-]\s*([^\n]{4,80})",
+        r"(?:hiring|seeking)\s+(?:a\s+)?([A-Z][^\n,.]{4,60})",
+        r"^([A-Z][a-zA-Z /]+(?:Engineer|Developer|Manager|Analyst|Designer|Architect))",
+    ):
+        match = re.search(pattern, jd, re.I | re.M)
+        if match:
+            return match.group(1).strip()[:120]
+    return "Open Role"
+
+
+def _guess_company_name(job_description: str, override: Optional[str] = None) -> str:
+    if override and override.strip():
+        return override.strip()[:120]
+    jd = job_description or ""
+    for pattern in (
+        r"(?:company|employer|organization)\s*[:\-]\s*([^\n]{2,80})",
+        r"(?:at|join)\s+([A-Z][A-Za-z0-9&.\- ]{2,50})(?:\s+is|\s+we|\s+are|\s*,)",
+        r"^([A-Z][A-Za-z0-9&.\- ]{2,50})\s+is (?:hiring|looking)",
+    ):
+        match = re.search(pattern, jd, re.I | re.M)
+        if match:
+            return match.group(1).strip()[:120]
+    return "Tailor Import"
 
 
 def _company_name(job: Optional[DBJob]) -> str:
@@ -187,6 +221,7 @@ class ResumeStudioService:
                             if isinstance(tailored, dict)
                             else []
                         ),
+                        tailor_source=(state.get("tailor_meta") or {}).get("source"),
                     )
                 )
 
@@ -324,6 +359,9 @@ class ResumeStudioService:
                 "added_keywords": list(
                     tailored.get("added_keywords") or [] if isinstance(tailored, dict) else []
                 ),
+                "parser_checks": state.get("ats_parser"),
+                "rationale": state.get("ats_rationale"),
+                "qualifications_match": state.get("qualifications_match"),
             },
             "downloads": {
                 kind: f"/api/v1/documents/package-download?application_id={app.id}&kind={kind}"
@@ -392,3 +430,199 @@ class ResumeStudioService:
                 raise HTTPException(status_code=404, detail="Resume version not found")
             await self.db.delete(version)
             await self.db.commit()
+
+    async def save_tailor_run(
+        self,
+        user_id: UUID,
+        *,
+        job_description: str,
+        tailored_resume: dict[str, Any],
+        base_resume: str,
+        job_url: Optional[str] = None,
+        company_name: Optional[str] = None,
+        role_title: Optional[str] = None,
+        before_score: Optional[int] = None,
+        after_score: Optional[int] = None,
+        unified_ats: Optional[dict[str, Any]] = None,
+        job_id: Optional[UUID] = None,
+        application_id: Optional[UUID] = None,
+        approve_version: bool = False,
+    ) -> dict[str, Any]:
+        """Persist a standalone Tailor run as a workflow draft (optional approved version)."""
+        if not tailored_resume:
+            raise HTTPException(status_code=422, detail="tailored_resume is required")
+        if not (job_description or "").strip():
+            raise HTTPException(status_code=422, detail="job_description is required")
+
+        company = _guess_company_name(job_description, company_name)
+        role = _guess_role_title(job_description, role_title)
+
+        job: Optional[DBJob] = None
+        app: Optional[DBApplication] = None
+
+        if job_id:
+            result = await self.db.execute(
+                select(DBJob).where(DBJob.id == job_id, DBJob.user_id == user_id)
+            )
+            job = result.scalars().first()
+            if not job:
+                raise HTTPException(status_code=404, detail="Job not found")
+
+        if application_id:
+            app = await self._get_app(user_id, application_id)
+            job = app.job
+
+        if not job:
+            if job_url:
+                result = await self.db.execute(
+                    select(DBJob).where(DBJob.user_id == user_id, DBJob.url == job_url)
+                )
+                job = result.scalars().first()
+            if not job:
+                job = DBJob(
+                    id=uuid4(),
+                    user_id=user_id,
+                    url=job_url,
+                    role_title=role,
+                    description_raw=job_description[:20000],
+                    description_normalized={
+                        "company_name": company,
+                        "role_title": role,
+                    },
+                    status="Imported",
+                )
+                self.db.add(job)
+                await self.db.flush()
+
+        if not app:
+            result = await self.db.execute(
+                select(DBApplication).where(
+                    DBApplication.job_id == job.id,
+                    DBApplication.user_id == user_id,
+                )
+            )
+            app = result.scalars().first()
+            if not app:
+                app = DBApplication(
+                    user_id=user_id,
+                    job_id=job.id,
+                    stage="Researching",
+                    workflow_state={},
+                )
+                self.db.add(app)
+                await self.db.flush()
+
+        ats_service = ATSService()
+        if unified_ats:
+            from app.schemas.ats import UnifiedATSResult
+
+            unified = UnifiedATSResult.model_validate(unified_ats)
+        else:
+            resume_text = structured_resume_to_text(tailored_resume)
+            unified = await ats_service.analyze(
+                resume_text,
+                job_description,
+                structured_content=tailored_resume,
+            )
+
+        state = dict(app.workflow_state or {})
+        state.update(unified.to_workflow_state())
+        state["tailored_resume"] = tailored_resume
+        state["tailor_meta"] = {
+            "source": "tailor_page",
+            "base_resume": base_resume,
+            "job_url": job_url,
+            "before_score": before_score,
+            "after_score": after_score or unified.score,
+            "saved_at": datetime.utcnow().isoformat(),
+        }
+        app.workflow_state = state
+        app.stage = app.stage or "Researching"
+        app.updated_at = datetime.utcnow()
+
+        version_id: Optional[str] = None
+        if approve_version:
+            ver = DBResumeVersion(
+                application_id=app.id,
+                tailored_content=tailored_resume,
+                ats_score=unified.score,
+                feedback=[{"evidence": unified.recommendation, "source": "tailor_save"}],
+            )
+            self.db.add(ver)
+            await self.db.flush()
+            version_id = str(ver.id)
+
+        await self.db.commit()
+
+        item_id = version_id or f"app-{app.id}"
+        return {
+            "item_id": item_id,
+            "application_id": str(app.id),
+            "job_id": str(job.id),
+            "ats_score": unified.score,
+            "approved": bool(version_id),
+            "company": company,
+            "role_title": role,
+        }
+
+    async def update_studio_content(
+        self,
+        user_id: UUID,
+        item_id: str,
+        *,
+        tailored_resume: dict[str, Any],
+        rescore: bool = True,
+    ) -> dict[str, Any]:
+        """Update tailored content on a draft or version; optionally re-run unified ATS."""
+        if not tailored_resume:
+            raise HTTPException(status_code=422, detail="tailored_resume is required")
+
+        version: Optional[DBResumeVersion] = None
+        app: Optional[DBApplication] = None
+
+        if item_id.startswith("app-"):
+            app_uuid = UUID(item_id[4:])
+            app = await self._get_app(user_id, app_uuid)
+        else:
+            ver_uuid = UUID(item_id)
+            result = await self.db.execute(
+                select(DBResumeVersion)
+                .where(DBResumeVersion.id == ver_uuid)
+                .options(selectinload(DBResumeVersion.application).selectinload(DBApplication.job))
+            )
+            version = result.scalars().first()
+            if not version or not version.application or version.application.user_id != user_id:
+                raise HTTPException(status_code=404, detail="Resume version not found")
+            app = version.application
+
+        job = app.job
+        jd = (job.description_raw if job else "") or ""
+
+        unified = None
+        if rescore and jd.strip():
+            ats_service = ATSService()
+            resume_text = structured_resume_to_text(tailored_resume)
+            unified = await ats_service.analyze(
+                resume_text, jd, structured_content=tailored_resume
+            )
+
+        if version:
+            version.tailored_content = tailored_resume
+            if unified:
+                version.ats_score = unified.score
+            version.updated_at = datetime.utcnow()
+
+        state = dict(app.workflow_state or {})
+        state["tailored_resume"] = tailored_resume
+        if unified:
+            state.update(unified.to_workflow_state())
+        app.workflow_state = state
+        app.updated_at = datetime.utcnow()
+
+        await self.db.commit()
+
+        return {
+            "item_id": item_id,
+            "ats_score": unified.score if unified else state.get("ats_score"),
+            "unified_ats": unified.to_api_payload() if unified else None,
+        }

@@ -7,10 +7,13 @@ import { usePanelStore } from "@/store/panelStore";
 import { useWorkflowStore, SkillImpact } from "@/hooks/useWorkflowStore";
 import {
   CheckCircle, Wand2, X, AlertCircle, ArrowLeft, Download,
-  Eye, RefreshCw, TrendingUp, Zap, Minus, ArrowUp
+  Eye, RefreshCw, TrendingUp, Zap, Minus, ArrowUp, FileCode, FileText, Save
 } from "lucide-react";
 import Link from "next/link";
 import { ResumeComparison } from "@/components/ui/ResumeComparison";
+import { StructuredResumeEditor, StructuredResumeData } from "@/components/ui/StructuredResumeEditor";
+import type { ParserChecks, UnifiedAtsPayload, TailorResumeRequestBody } from "@/types/resume";
+import { LatexEditor } from "@/components/ui/LatexEditor";
 
 interface BaseResume {
   name: string;
@@ -108,18 +111,22 @@ export default function TailorPage() {
   const [isTailoring, setIsTailoring] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [showComparison, setShowComparison] = useState(false);
-  const [downloadData, setDownloadData] = useState<any>(null);
+  const [downloadData, setDownloadData] = useState<StructuredResumeData | null>(null);
+  const [latexPreview, setLatexPreview] = useState<string | null>(null);
+  const [showLatex, setShowLatex] = useState(false);
+  const [loadingLatex, setLoadingLatex] = useState(false);
+  const [parserChecks, setParserChecks] = useState<ParserChecks | null>(null);
+  const [unifiedAts, setUnifiedAts] = useState<UnifiedAtsPayload | null>(null);
+  const [structuredDraft, setStructuredDraft] = useState<StructuredResumeData>({});
+  const [savingStudio, setSavingStudio] = useState(false);
+  const [studioSavedId, setStudioSavedId] = useState<string | null>(null);
 
   const authHeaders = useCallback(
     () => ({ Authorization: `Bearer ${token}` }),
     [token]
   );
 
-  useEffect(() => {
-    if (selectedBaseResume && token) previewResume(selectedBaseResume);
-  }, [selectedBaseResume, token]);
-
-  const previewResume = async (name: string) => {
+  const previewResume = useCallback(async (name: string) => {
     if (!token) return;
     try {
       const res = await fetch(
@@ -138,7 +145,11 @@ export default function TailorPage() {
         setOriginalResumeData({ text: data.text ?? "", fileUrl: data.file_url ?? undefined });
       }
     } catch { /* ignore */ }
-  };
+  }, [token, setPreview, setOriginalResumeData]);
+
+  useEffect(() => {
+    if (selectedBaseResume && token) previewResume(selectedBaseResume);
+  }, [selectedBaseResume, token, previewResume]);
 
   useEffect(() => {
     if (!token) return;
@@ -200,6 +211,12 @@ export default function TailorPage() {
         niceToHaveMissing: data.nice_to_have_missing ?? gap.nice_to_have_missing ?? [],
         qualificationsMatch: data.qualifications_match ?? gap.qualifications_match ?? "",
       });
+      if (data.unified_ats) {
+        setUnifiedAts(data.unified_ats);
+        setParserChecks(data.unified_ats.parser_checks || null);
+      } else if (gap.parser_checks) {
+        setParserChecks(gap.parser_checks);
+      }
       if (data.scrape_warning) setScrapeWarning(data.scrape_warning);
       else if (data.analysis_mode === "heuristic") {
         setScrapeWarning(
@@ -225,7 +242,7 @@ export default function TailorPage() {
     setIsTailoring(true);
     setError(null);
     try {
-      const body: any = {
+      const body: TailorResumeRequestBody = {
         job_description: jdText,
         job_url: jobUrl,
         base_resume: selectedBaseResume || baseResumes[0]?.name,
@@ -248,7 +265,12 @@ export default function TailorPage() {
       }
       const data = await res.json();
       setFinalState({ tailored_resume: data.optimized_resume });
+      setStructuredDraft(data.optimized_resume || {});
       setTailorState({ afterAtsScore: data.after_ats_score ?? null });
+      if (data.unified_ats) {
+        setUnifiedAts(data.unified_ats);
+        setParserChecks(data.unified_ats.parser_checks || null);
+      }
       setStep(3);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Tailor failed";
@@ -262,29 +284,106 @@ export default function TailorPage() {
     }
   };
 
-  const handleDownloadDocx = async (editedData?: any) => {
+  const handleSaveToStudio = async (approve = false) => {
+    const payload = structuredDraft.summary ? structuredDraft : finalState?.tailored_resume;
+    if (!payload || !jdText.trim()) {
+      setError("Generate a tailored resume before saving to Studio.");
+      return;
+    }
+    setSavingStudio(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/v1/resumes/studio/save-tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({
+          job_description: jdText,
+          job_url: jobUrl || null,
+          base_resume: selectedBaseResume || baseResumes[0]?.name,
+          tailored_resume: payload,
+          before_ats_score: beforeAtsScore,
+          after_ats_score: afterAtsScore,
+          unified_ats: unifiedAts,
+          approve_version: approve,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(typeof body.detail === "string" ? body.detail : "Save failed");
+      }
+      const data = await res.json();
+      setStudioSavedId(data.item_id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save to Studio failed");
+    } finally {
+      setSavingStudio(false);
+    }
+  };
+
+  const handleStructuredChange = (next: StructuredResumeData) => {
+    setStructuredDraft(next);
+    setFinalState({ tailored_resume: next });
+  };
+
+  const handleDownloadDocx = async (editedData?: StructuredResumeData) => {
+    await downloadExport("/api/v1/documents/export/docx", editedData, "Tailored_Resume.docx");
+  };
+
+  const handleDownloadPdf = async (editedData?: StructuredResumeData) => {
+    await downloadExport("/api/v1/documents/export/pdf", editedData, "Tailored_Resume.pdf");
+  };
+
+  const handleDownloadTex = async (editedData?: StructuredResumeData) => {
+    await downloadExport("/api/v1/documents/export/tex", editedData, "Tailored_Resume.tex");
+  };
+
+  const downloadExport = async (
+    url: string,
+    editedData: StructuredResumeData | undefined,
+    filename: string
+  ) => {
     setIsDownloading(true);
     try {
       const payload = editedData || finalState?.tailored_resume || {};
-      const res = await fetch("/api/v1/documents/export/docx", {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error("Failed to export docx");
+      if (!res.ok) throw new Error(`Failed to export ${filename.split(".").pop()}`);
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = `Tailored_Resume.docx`;
+      a.href = objectUrl;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(objectUrl);
       document.body.removeChild(a);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Download failed");
     } finally {
       setIsDownloading(false);
+    }
+  };
+
+  const loadLatexPreview = async () => {
+    const payload = finalState?.tailored_resume;
+    if (!payload) return;
+    setLoadingLatex(true);
+    try {
+      const res = await fetch("/api/v1/documents/export/tex", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error("Could not generate LaTeX preview");
+      setLatexPreview(await res.text());
+      setShowLatex(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "LaTeX preview failed");
+    } finally {
+      setLoadingLatex(false);
     }
   };
 
@@ -316,11 +415,6 @@ export default function TailorPage() {
     setIsTailoring(true);
     setError(null);
     try {
-      // We call with the tailored text directly via the iterative field
-      // But analyze-jd-skills only takes base_resume (file name).
-      // We use the skill_gap_agent directly by sending text as job_description context trick —
-      // Actually we reuse analyze-jd-skills with the existing base_resume but update the beforeAtsScore
-      // to the afterAtsScore from the last round.
       const res = await fetch("/api/v1/workflows/analyze-jd-skills", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -328,6 +422,7 @@ export default function TailorPage() {
           job_description: jdText,
           job_url: jobUrl,
           base_resume: selectedBaseResume || baseResumes[0]?.name,
+          resume_text: resumeText,
         }),
         signal: AbortSignal.timeout(300_000),
       });
@@ -707,7 +802,46 @@ export default function TailorPage() {
                 </div>
               )}
 
-              {/* Tailored content preview */}
+              {/* Parser / ATS checks */}
+              {parserChecks && (
+                <div className="rounded-xl border border-border bg-card p-4 space-y-2 text-sm">
+                  <p className="font-semibold text-sm">ATS parser checks</p>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    {parserChecks.has_summary_section && <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600">Summary ✓</span>}
+                    {parserChecks.has_experience_section && <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600">Experience ✓</span>}
+                    {parserChecks.has_skills_section && <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600">Skills ✓</span>}
+                    <span className="px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                      Keyword match {Math.round((parserChecks.keyword_density || 0) * 100)}%
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                      Parser score {parserChecks.overall_parser_score}/100
+                    </span>
+                  </div>
+                  {((parserChecks.warnings?.length ?? 0) > 0) && (
+                    <ul className="text-xs text-amber-600 dark:text-amber-400 list-disc pl-4 space-y-1">
+                      {(parserChecks.warnings ?? []).map((w: string, i: number) => <li key={i}>{w}</li>)}
+                    </ul>
+                  )}
+                  {((parserChecks.suggestions?.length ?? 0) > 0) && (
+                    <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-1">
+                      {(parserChecks.suggestions ?? []).slice(0, 3).map((s: string, i: number) => <li key={i}>{s}</li>)}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              {/* Structured editor */}
+              {finalState?.tailored_resume && (
+                <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm p-4">
+                  <p className="font-semibold text-sm mb-3">Edit sections before download</p>
+                  <StructuredResumeEditor
+                    value={structuredDraft.summary ? structuredDraft : finalState.tailored_resume}
+                    onChange={handleStructuredChange}
+                  />
+                </div>
+              )}
+
+              {/* Tailored content preview (read-only summary) */}
               {finalState?.tailored_resume && (
                 <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
                   <div className="flex items-center gap-2 p-4 border-b border-border bg-muted/40">
@@ -719,7 +853,7 @@ export default function TailorPage() {
                       </span>
                     )}
                   </div>
-                  <div className="p-5 space-y-4 max-h-80 overflow-y-auto">
+                  <div className="p-5 space-y-4 max-h-48 overflow-y-auto">
                     {finalState.tailored_resume.summary && (
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Summary</p>
@@ -774,6 +908,26 @@ export default function TailorPage() {
                 </button>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  {/* Save to Studio */}
+                  <button
+                    type="button"
+                    onClick={() => handleSaveToStudio(false)}
+                    disabled={savingStudio}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-primary/40 text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-50"
+                  >
+                    {savingStudio ? (
+                      <span className="h-4 w-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4" />
+                    )}
+                    Save to Studio
+                  </button>
+                  {studioSavedId && (
+                    <Link href="/resumes" className="text-xs text-emerald-600 hover:underline">
+                      Saved — open Studio
+                    </Link>
+                  )}
+
                   {/* Improve Further */}
                   <button
                     type="button"
@@ -795,6 +949,32 @@ export default function TailorPage() {
                     Compare
                   </button>
 
+                  {/* LaTeX source */}
+                  <button
+                    type="button"
+                    onClick={() => (showLatex ? setShowLatex(false) : loadLatexPreview())}
+                    disabled={loadingLatex}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-border text-sm font-medium hover:bg-muted transition-all"
+                  >
+                    {loadingLatex ? (
+                      <span className="h-4 w-4 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin" />
+                    ) : (
+                      <FileCode className="h-4 w-4" />
+                    )}
+                    {showLatex ? "Hide LaTeX" : "View LaTeX"}
+                  </button>
+
+                  {/* Download PDF (LaTeX-compiled, ATS-friendly) */}
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadPdf()}
+                    disabled={isDownloading}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-emerald-600/40 text-emerald-600 dark:text-emerald-400 text-sm font-medium hover:bg-emerald-500/10 disabled:opacity-50 transition-all"
+                  >
+                    <FileText className="h-4 w-4" />
+                    PDF
+                  </button>
+
                   {/* Download DOCX */}
                   <button
                     type="button"
@@ -805,10 +985,29 @@ export default function TailorPage() {
                     {isDownloading ? (
                       <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     ) : <Download className="h-4 w-4" />}
-                    Download DOCX
+                    DOCX
+                  </button>
+
+                  {/* Download LaTeX source */}
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadTex()}
+                    disabled={isDownloading}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-border text-sm font-medium hover:bg-muted disabled:opacity-50 transition-all"
+                  >
+                    <FileCode className="h-4 w-4" />
+                    .tex
                   </button>
                 </div>
               </div>
+
+              {showLatex && latexPreview && (
+                <LatexEditor
+                  initialTex={latexPreview}
+                  authHeaders={authHeaders}
+                  onClose={() => setShowLatex(false)}
+                />
+              )}
             </div>
           )}
         </div>

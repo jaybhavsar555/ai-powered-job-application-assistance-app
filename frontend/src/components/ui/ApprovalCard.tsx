@@ -9,18 +9,17 @@ import {
   SkipForward,
 } from "lucide-react";
 
+import type { StructuredResumeData } from "@/types/resume";
+
 interface ApprovalCardProps {
   title: string;
   originalText: string;
   proposedText: string;
-  proposedData?: {
-    summary?: string;
-    tailored_bullets?: string[];
-  };
+  proposedData?: StructuredResumeData;
   evidence: string;
-  onApprove?: (editedText?: string, editedData?: any) => void;
+  onApprove?: (editedText?: string, editedData?: StructuredResumeData) => void;
   onReject?: () => void;
-  onReevaluate?: (editedData: any) => Promise<void>;
+  onReevaluate?: (editedData: StructuredResumeData) => Promise<void>;
   /** Soft skip — leave pending / revisit later */
   onSkip?: () => void;
   /** Ask agent to revise (optional — parent may open Canvas) */

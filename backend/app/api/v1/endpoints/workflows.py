@@ -97,36 +97,42 @@ class AnalyzeJDSkillsRequest(BaseModel):
     job_description: str
     job_url: Optional[str] = None
     base_resume: str
+    # Iterative tailor: score the already-tailored text instead of the library file
+    resume_text: Optional[str] = None
 
 @router.post("/analyze-jd-skills")
 async def analyze_jd_skills(
     request: AnalyzeJDSkillsRequest,
     current_user: User = Depends(get_current_user)
 ):
-    from app.application.agents.skill_gap_agent import SkillGapAgent
+    from app.application.services.ats_service import ATSService
     from app.infrastructure.resume_library import extract_text
     from app.infrastructure.scraping import scrape_job_page
     from pathlib import Path
 
     cfg = get_settings()
     source_dir = Path(cfg.RESUME_SOURCE_DIR)
-    file_path = source_dir / request.base_resume
 
-    if not file_path.exists():
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Resume file not found: {request.base_resume}. "
-                "Pick a resume from the Tailor dropdown (files under data/resumes)."
-            ),
-        )
+    if request.resume_text and request.resume_text.strip():
+        resume_text = request.resume_text.strip()
+    else:
+        file_path = source_dir / request.base_resume
 
-    resume_text = extract_text(file_path)
-    if not (resume_text or "").strip():
-        raise HTTPException(
-            status_code=422,
-            detail=f"Could not extract text from resume: {request.base_resume}",
-        )
+        if not file_path.exists():
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Resume file not found: {request.base_resume}. "
+                    "Pick a resume from the Tailor dropdown (files under data/resumes)."
+                ),
+            )
+
+        resume_text = extract_text(file_path)
+        if not (resume_text or "").strip():
+            raise HTTPException(
+                status_code=422,
+                detail=f"Could not extract text from resume: {request.base_resume}",
+            )
 
     job_text = (request.job_description or "").strip()
     scrape_source = None
@@ -163,14 +169,9 @@ async def analyze_jd_skills(
             detail="Please provide a job description (paste text or a scrapable URL)."
         )
 
-    agent = SkillGapAgent()
+    ats_service = ATSService()
     try:
-        gap = await agent.run(
-            {
-                "resume_json": resume_text[:12000],
-                "job_description": job_text[:12000],
-            }
-        )
+        unified = await ats_service.analyze(resume_text, job_text[:12000])
     except RuntimeError as exc:
         raise HTTPException(
             status_code=503,
@@ -181,8 +182,8 @@ async def analyze_jd_skills(
             status_code=500,
             detail=f"Analysis failed: {type(exc).__name__}: {exc}",
         ) from exc
-    skill_gap = gap.get("skill_gap", {})
-    analysis_mode = gap.get("analysis_mode") or "llm"
+    skill_gap = ats_service.to_skill_gap_payload(unified)
+    analysis_mode = unified.analysis_mode
     warning = scrape_warning
     if analysis_mode == "heuristic":
         heuristic_note = (
@@ -202,7 +203,8 @@ async def analyze_jd_skills(
         "scrape_source": scrape_source,
         "scrape_warning": warning,
         "analysis_mode": analysis_mode,
-        "llm_error": gap.get("llm_error"),
+        "llm_error": unified.llm_error,
+        "unified_ats": unified.to_api_payload(),
     }
 
 class TailorResumeRequest(BaseModel):
@@ -220,10 +222,8 @@ async def tailor_resume_manual(
     current_user: User = Depends(get_current_user)
 ):
     from app.application.agents.resume_optimizer import ResumeOptimizerAgent
-    from app.application.agents.skill_gap_agent import (
-        SkillGapAgent,
-        heuristic_skill_gap,
-    )
+    from app.application.agents.skill_gap_agent import heuristic_skill_gap
+    from app.application.services.ats_service import ATSService
     from app.infrastructure.resume_library import extract_text
     from app.infrastructure.scraping import scrape_job_page
     from pathlib import Path
@@ -304,14 +304,13 @@ async def tailor_resume_manual(
             *optimized.get("added_keywords", []),
         ]
     )
-    gap_agent = SkillGapAgent()
-    after_gap = await gap_agent.run(
-        {
-            "resume_json": tailored_text[:6000],
-            "job_description": job_text[:6000],
-        }
+    ats_service = ATSService()
+    after_unified = await ats_service.analyze(
+        tailored_text[:6000],
+        job_text[:6000],
+        structured_content=optimized,
     )
-    after_score = after_gap.get("skill_gap", {}).get("match_score", 0)
+    after_score = after_unified.score
 
     return {
         "status": "ok",
@@ -319,7 +318,8 @@ async def tailor_resume_manual(
         "before_ats_score": request.before_ats_score,
         "after_ats_score": after_score,
         "scrape_warning": scrape_warning,
-        "analysis_mode": after_gap.get("analysis_mode"),
+        "analysis_mode": after_unified.analysis_mode,
+        "unified_ats": after_unified.to_api_payload(),
     }
 
 

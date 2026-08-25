@@ -22,6 +22,7 @@ import {
   MoreVertical,
   Trash,
 } from "lucide-react";
+import { StructuredResumeEditor, StructuredResumeData } from "@/components/ui/StructuredResumeEditor";
 import { useAuthStore } from "@/store/auth";
 import { usePanelStore } from "@/store/panelStore";
 
@@ -69,6 +70,16 @@ interface StudioDetail extends StudioItem {
     matching_skills: string[];
     recommendation?: string | null;
     added_keywords?: string[];
+    parser_checks?: {
+      overall_parser_score?: number;
+      keyword_density?: number;
+      warnings?: string[];
+      suggestions?: string[];
+      has_summary_section?: boolean;
+      has_experience_section?: boolean;
+      has_skills_section?: boolean;
+    } | null;
+    rationale?: string | null;
   };
   downloads: Record<string, string>;
 }
@@ -76,6 +87,7 @@ interface StudioDetail extends StudioItem {
 const DOWNLOAD_LABELS: Record<string, string> = {
   resume_pdf: "Resume PDF",
   resume_docx: "Resume DOCX",
+  resume_tex: "Resume LaTeX",
   cover_pdf: "Cover PDF",
   cover_docx: "Cover DOCX",
 };
@@ -110,6 +122,7 @@ export default function ResumesPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<StudioDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailSaving, setDetailSaving] = useState(false);
   const token = useAuthStore((s) => s.token);
   const [selectedBaseResume, setSelectedBaseResume] = useState<string | null>(null);
   const [showTailorModal, setShowTailorModal] = useState(false);
@@ -256,6 +269,36 @@ export default function ResumesPage() {
   const applyTailoredFilter = (next: TailoredFilter) => {
     setTailoredFilter((prev) => (prev === next ? "all" : next));
     setView("tailored");
+  };
+
+  const saveStudioContent = async (data: StructuredResumeData, rescore = true) => {
+    if (!selectedId) return;
+    setDetailSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/v1/resumes/studio/${encodeURIComponent(selectedId)}/content`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ tailored_resume: data, rescore }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(typeof body.detail === "string" ? body.detail : "Save failed");
+      }
+      const payload = await res.json();
+      await openDetail(selectedId);
+      if (payload.ats_score != null && detail) {
+        setDetail({
+          ...detail,
+          ats: { ...detail.ats, score: payload.ats_score },
+        });
+      }
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setDetailSaving(false);
+    }
   };
 
   const openDetail = async (id: string) => {
@@ -913,8 +956,32 @@ export default function ResumesPage() {
                         tone="neutral"
                       />
                     )}
+                    {detail.ats.parser_checks && (
+                      <div className="rounded-md border bg-background/50 p-3 space-y-2 text-xs">
+                        <p className="font-medium">Parser checks</p>
+                        <p className="text-muted-foreground">
+                          Parser score {detail.ats.parser_checks.overall_parser_score ?? "?"}/100 ·
+                          keyword density {Math.round((detail.ats.parser_checks.keyword_density || 0) * 100)}%
+                        </p>
+                        {(detail.ats.parser_checks.warnings || []).slice(0, 3).map((w, i) => (
+                          <p key={i} className="text-amber-600 dark:text-amber-400">{w}</p>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
+
+                <div className="rounded-lg border p-4 space-y-3">
+                  <h3 className="text-sm font-semibold">Structured editor</h3>
+                  <StructuredResumeEditor
+                    value={(detail.tailored.content || {}) as StructuredResumeData}
+                    onChange={() => {}}
+                    onSave={(data) => saveStudioContent(data, true)}
+                    onRescore={(data) => saveStudioContent(data, true)}
+                    saving={detailSaving}
+                    rescoreLabel="Save & re-score ATS"
+                  />
+                </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                   <div className="rounded-lg border p-3 space-y-2 min-h-0">

@@ -3,8 +3,6 @@ from typing import List, Dict, Any
 
 from app.application.agents.base import OSAgent
 from app.application.agents.registry import agent_registry
-from app.core.prompts.registry import prompt_registry
-from app.infrastructure.llm.client import structured_generate
 
 class ATSAnalysisResult(BaseModel):
     score: int = Field(..., description="ATS fit score from 0 to 100")
@@ -26,24 +24,13 @@ class ATSAnalyzerAgent(OSAgent):
         )
 
     async def run(self, state: Dict[str, Any], *args, **kwargs) -> Dict[str, Any]:
+        from app.application.services.ats_service import ATSService
+
         resume_content = state.get("resume_json", "{}")
         job_description = state.get("job_description", "")
-        system_prompt = prompt_registry.get_prompt(self.name)
 
-        result = await structured_generate(
-            ATSAnalysisResult,
-            [
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": (
-                        f"Resume:\n{(resume_content or '')[:1200]}\n\n"
-                        f"Job Description:\n{(job_description or '')[:1800]}"
-                    ),
-                },
-            ],
-            fallback=self._mock,
-        )
-        return {"ats_score": result.model_dump()}
+        ats_service = ATSService()
+        unified = await ats_service.analyze(str(resume_content), str(job_description))
+        return {"ats_score": ats_service.to_legacy_ats_score(unified)}
 
 agent_registry.register(ATSAnalyzerAgent())

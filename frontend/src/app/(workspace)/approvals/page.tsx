@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useWorkflowStore } from "@/hooks/useWorkflowStore";
 import { ApprovalCard } from "@/components/ui/ApprovalCard";
+import type { StructuredResumeData } from "@/types/resume";
 import { AlertCircle, CheckCircle2, FileStack, Loader2, Download, Copy, Eye } from "lucide-react";
 import api, { getApiErrorMessage, API_BASE_URL } from "@/lib/api";
 import { DEMO_JOB_ID } from "@/components/workflow/CanvasJobPicker";
@@ -145,7 +146,12 @@ export default function ApprovalsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- trigger once when both approved
   }, [bothApproved, jobId]);
 
-  const decide = async (artifact: CardKey, decision: "approve" | "reject", editedText?: string, editedData?: any) => {
+  const decide = async (
+    artifact: CardKey,
+    decision: "approve" | "reject",
+    editedText?: string,
+    editedData?: StructuredResumeData
+  ) => {
     if (!jobId) {
       setError(
         "Missing job_id from workflow — re-run Simulate with a selected Tracker job."
@@ -160,7 +166,11 @@ export default function ApprovalsPage() {
       let finalCover = artifact === "cover_letter" ? coverLetter : undefined;
 
       if (editedData && artifact === "resume") {
-        finalResume = { ...resumeUpdates, ...editedData, manual_override: true };
+        finalResume = {
+          ...resumeUpdates,
+          ...editedData,
+          manual_override: editedText || "structured_edit",
+        };
       } else if (editedText) {
         if (artifact === "cover_letter") {
           finalCover = editedText;
@@ -201,7 +211,7 @@ export default function ApprovalsPage() {
     }
   };
 
-  const handleReevaluate = async (editedData: any) => {
+  const handleReevaluate = async (editedData: StructuredResumeData) => {
     if (!jobId) return;
     try {
       const { data } = await api.post("/approvals/reevaluate", {
