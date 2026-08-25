@@ -1,12 +1,10 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ThemeProvider as NextThemesProvider } from 'next-themes';
-import { type ThemeProviderProps } from 'next-themes/dist/types';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ensureValidSession } from '@/lib/api';
 
-function AuthBootstrap({ children }: { children: React.ReactNode }) {
+function AuthBootstrap({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -47,21 +45,22 @@ function AuthBootstrap({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-export function Providers({ children, ...props }: ThemeProviderProps) {
-  const [queryClient] = useState(() => new QueryClient({
-    defaultOptions: {
-      queries: {
-        staleTime: 60 * 1000,
-        retry: 1,
-      },
-    },
-  }));
+export function Providers({ children }: { children: ReactNode }) {
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 60 * 1000,
+            retry: 1,
+          },
+        },
+      })
+  );
 
   return (
-    <NextThemesProvider {...props}>
-      <QueryClientProvider client={queryClient}>
-        <AuthBootstrap>{children}</AuthBootstrap>
-      </QueryClientProvider>
-    </NextThemesProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthBootstrap>{children}</AuthBootstrap>
+    </QueryClientProvider>
   );
 }

@@ -29,34 +29,23 @@ export const useAuthStore = create<AuthState>()(
     {
       name: 'auth-storage',
       partialize: (state) => ({ token: state.token, user: state.user }),
-      onRehydrateStorage: () => (state, error) => {
-        if (error) {
-          console.warn('[auth] persist rehydrate failed', error);
-        }
-        // Always mark hydrated so bootstrap cannot wait forever.
-        useAuthStore.getState().setHasHydrated(true);
-        if (state) {
-          // no-op: persist already merged token/user
-        }
+      onRehydrateStorage: () => () => {
+        // Defer so `useAuthStore` is fully assigned (TDZ-safe). Do not use
+        // `.persist` APIs here — they can be missing under Turbopack/HMR.
+        setTimeout(() => {
+          useAuthStore.setState({ hasHydrated: true });
+        }, 0);
       },
     }
   )
 );
 
-function alreadyHydrated(): boolean {
-  return (
-    useAuthStore.getState().hasHydrated ||
-    Boolean(useAuthStore.persist?.hasHydrated?.())
-  );
-}
-
 /**
  * Wait until localStorage session has been read.
- * Resolves immediately if already done; never waits more than `timeoutMs`.
+ * Never touches `store.persist` (undefined under some Turbopack loads).
  */
 export function waitForAuthHydration(timeoutMs = 800): Promise<void> {
-  if (alreadyHydrated()) {
-    useAuthStore.getState().setHasHydrated(true);
+  if (useAuthStore.getState().hasHydrated) {
     return Promise.resolve();
   }
 
@@ -65,32 +54,25 @@ export function waitForAuthHydration(timeoutMs = 800): Promise<void> {
     const finish = () => {
       if (settled) return;
       settled = true;
-      useAuthStore.getState().setHasHydrated(true);
+      useAuthStore.setState({ hasHydrated: true });
       resolve();
     };
 
-    const unsubFinish = useAuthStore.persist.onFinishHydration(() => {
-      unsubFinish();
-      finish();
-    });
-    const unsubStore = useAuthStore.subscribe((s) => {
+    const unsub = useAuthStore.subscribe((s) => {
       if (s.hasHydrated) {
-        unsubStore();
+        unsub();
         finish();
       }
     });
 
-    // Race: hydration may complete between the first check and the listeners.
-    if (alreadyHydrated()) {
-      unsubFinish();
-      unsubStore();
+    if (useAuthStore.getState().hasHydrated) {
+      unsub();
       finish();
       return;
     }
 
-    window.setTimeout(() => {
-      unsubFinish();
-      unsubStore();
+    setTimeout(() => {
+      unsub();
       finish();
     }, timeoutMs);
   });
