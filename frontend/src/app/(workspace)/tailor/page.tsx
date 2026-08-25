@@ -161,14 +161,14 @@ export default function TailorPage() {
           const data = await res.json();
           const files = data.files || [];
           setBaseResumes(files);
-          if (files[0] && !selectedBaseResume) setSelectedBaseResume(files[0].name);
+          if (files[0] && !selectedBaseResume) setTailorState({ selectedBaseResume: files[0].name });
         }
       } catch { setError("Failed to load templates."); }
       finally { setLoading(false); }
     };
     fetchLibrary();
     return () => { closePdf(); };
-  }, [token, authHeaders, closePdf, selectedBaseResume, setSelectedBaseResume]);
+  }, [token, authHeaders, closePdf, selectedBaseResume, setTailorState]);
 
   const handleAnalyzeJd = async () => {
     if (!jdText.trim() && !jobUrl.trim()) {
