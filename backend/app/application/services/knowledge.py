@@ -158,12 +158,23 @@ class KnowledgeBaseService:
 
         created = 0
         skipped = 0
+        ats_created = 0
         for portal in JOB_PORTALS:
             url = str(portal["url"]).rstrip("/")
             key = url.lower()
+            category = str(portal.get("category") or "job_board")
             if key in existing_urls:
                 skipped += 1
                 continue
+            note = (
+                f"ATS career-page host — {portal['title']}. Discovery searches "
+                "company boards here (not LinkedIn). Paste a posting URL into Jobs → Import."
+                if category == "ats_career_page"
+                else (
+                    f"Job posting portal — {portal['title']}. Browse openings, then "
+                    "paste a posting URL into Tracker → Import job."
+                )
+            )
             await self.create(
                 user_id,
                 WikiEntityCreate(
@@ -172,20 +183,23 @@ class KnowledgeBaseService:
                     content={
                         "url": portal["url"],
                         "region": portal.get("region", "Global"),
-                        "note": f"Job posting portal — {portal['title']}. Browse openings, then paste a posting URL into Tracker → Import job.",
-                        "category": "job_board",
+                        "note": note,
+                        "category": category,
                     },
                 ),
                 index_vectors=False,
             )
             existing_urls.add(key)
             created += 1
+            if category == "ats_career_page":
+                ats_created += 1
 
         roles_created = await self._seed_target_roles(user_id)
         return {
             "created": created,
             "skipped": skipped,
             "total": len(JOB_PORTALS),
+            "ats_created": ats_created,
             "target_roles_created": roles_created,
         }
 

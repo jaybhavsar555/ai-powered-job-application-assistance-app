@@ -18,10 +18,23 @@ class StartApplySessionRequest(BaseModel):
     reset: bool = False
 
 
+class PatchFieldsRequest(BaseModel):
+    fields: dict[str, str] = Field(default_factory=dict)
+
+
 class ApproveStepRequest(BaseModel):
-    step_id: Optional[str] = Field(
-        default=None, description="Optional; defaults to current active step"
-    )
+    step_id: Optional[str] = None
+
+
+@router.patch("/{application_id}/fields")
+async def patch_apply_fields(
+    application_id: UUID,
+    data: PatchFieldsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = ApplySessionService(db)
+    return await service.update_fields(current_user.id, application_id, data.fields)
 
 
 @router.post("/start")

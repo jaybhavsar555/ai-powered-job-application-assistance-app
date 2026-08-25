@@ -331,6 +331,7 @@ class DiscoverRequest(BaseModel):
     companyTypes: list[str] = []
     techStack: str = ""
     experienceLevel: str = ""
+    workAuthorization: str = ""  # citizen | opt | needs_sponsorship | other
 
 @router.post("/discover")
 async def trigger_discovery(

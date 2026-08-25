@@ -30,6 +30,7 @@ interface PreferenceState {
   companyTypes: string[];
   experienceLevel: string;
   techStack: string;
+  workAuthorization: string;
 }
 
 interface DiscoveredJob {
@@ -137,6 +138,7 @@ export default function DiscoveryPage() {
     companyTypes: ["Startups", "Mid-size"],
     experienceLevel: "Mid-Level (2-4y)",
     techStack: "",
+    workAuthorization: "",
   });
 
   const [dynamicSalary, setDynamicSalary] = useState(true);
@@ -176,6 +178,24 @@ export default function DiscoveryPage() {
 
   useEffect(() => {
     loadLibrary();
+    if (!token) return;
+    (async () => {
+      try {
+        const res = await fetch("/api/v1/apply-prefs", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const auth = String(data.work_authorization || "").trim();
+        if (auth) {
+          setPreferences((p) =>
+            p.workAuthorization ? p : { ...p, workAuthorization: auth }
+          );
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
@@ -445,8 +465,8 @@ export default function DiscoveryPage() {
               Proactive Job Discovery
             </h1>
             <p className="text-muted-foreground text-lg max-w-xl">
-              Searches your Vault job-portal KBs (Instahyre, Wellfound, YC, WWR,
-              and the rest) first — up to ~12 hits — then fills with Remotive /
+              Searches Vault ATS career pages first (Greenhouse, Lever, Ashby,
+              Workday), then other portal KBs — then fills with Remotive /
               RemoteOK / Arbeitnow. Score, Wishlist, then Canvas / Review &amp; Apply.
             </p>
           </div>
@@ -753,6 +773,40 @@ export default function DiscoveryPage() {
                         <div className={`w-5 h-5 rounded-full bg-white shadow-sm transform transition-transform duration-300 ${preferences.isRemote ? 'translate-x-5' : 'translate-x-0'}`} />
                       </div>
                     </label>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Work authorization</label>
+                    <p className="text-xs text-muted-foreground">
+                      Same pref as Inbox. Skips roles that say they do not sponsor
+                      (OPT / visa). Saved to apply prefs.
+                    </p>
+                    <select
+                      value={preferences.workAuthorization}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setPreferences({
+                          ...preferences,
+                          workAuthorization: value,
+                        });
+                        if (!token) return;
+                        void fetch("/api/v1/apply-prefs", {
+                          method: "PUT",
+                          headers: {
+                            Authorization: `Bearer ${token}`,
+                            "Content-Type": "application/json",
+                          },
+                          body: JSON.stringify({ work_authorization: value }),
+                        });
+                      }}
+                      className="w-full h-11 px-3 rounded-xl border border-input bg-background text-sm"
+                    >
+                      <option value="">Not specified</option>
+                      <option value="citizen">Citizen / no sponsorship needed</option>
+                      <option value="opt">OPT / STEM-OPT</option>
+                      <option value="needs_sponsorship">Need visa sponsorship</option>
+                      <option value="other">Other / prefer not to say</option>
+                    </select>
                   </div>
                   
                   <div className="pt-2 space-y-3">
