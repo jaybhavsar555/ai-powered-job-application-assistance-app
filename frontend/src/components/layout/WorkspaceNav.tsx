@@ -37,6 +37,7 @@ const simplePrimary: NavItem[] = [
   { name: "Apply", href: "/apply", icon: Sparkles },
   { name: "Resumes", href: "/resumes", icon: FileText },
   { name: "Second Brain", href: "/second-brain", icon: Brain },
+  { name: "Knowledge Vault", href: "/vault", icon: Database },
   { name: "Tracker", href: "/tracker", icon: Network },
   { name: "Outreach", href: "/outreach", icon: Send },
   { name: "Approvals", href: "/approvals", icon: ClipboardCheck },
@@ -48,12 +49,12 @@ const simpleMore: NavItem[] = [
   { name: "Companies", href: "/companies", icon: Building2 },
   { name: "Recruiters", href: "/recruiters", icon: Users },
   { name: "Analytics", href: "/analytics", icon: LineChart },
-  { name: "Vault", href: "/vault", icon: Database },
 ];
 
 const advancedNavItems: NavItem[] = [
   { name: "Canvas", href: "/canvas", icon: BrainCircuit },
-  { name: "Vault", href: "/vault", icon: Database },
+  { name: "Second Brain", href: "/second-brain", icon: Brain },
+  { name: "Knowledge Vault", href: "/vault", icon: Database },
   { name: "Screening Q&A", href: "/screening-qa", icon: HelpCircle },
   { name: "Approvals", href: "/approvals", icon: ClipboardCheck },
   { name: "Tracker", href: "/tracker", icon: Network },

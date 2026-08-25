@@ -144,7 +144,11 @@ export default function SecondBrainPage() {
           </h1>
           <p className="text-sm text-muted-foreground mt-1 max-w-xl">
             Sync jobs, JDs, resumes, and status into Obsidian. Prep when shortlisted.
-            Practice fundamentals every day.
+            Practice fundamentals every day. This is separate from{" "}
+            <Link href="/vault" className="text-primary hover:underline">
+              Knowledge Vault
+            </Link>{" "}
+            (in-app skills, portals, and semantic search).
           </p>
         </div>
         <button
@@ -401,6 +405,30 @@ export default function SecondBrainPage() {
           >
             Resume Studio <ArrowRight className="h-3.5 w-3.5" />
           </Link>
+          <Link
+            href="/vault"
+            className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+          >
+            Knowledge Vault <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-dashed bg-muted/10 p-4 md:p-5 space-y-2">
+        <h2 className="font-semibold text-sm">Second Brain vs Knowledge Vault</h2>
+        <div className="grid sm:grid-cols-2 gap-3 text-sm text-muted-foreground">
+          <div className="rounded-lg border bg-card p-3 space-y-1">
+            <p className="font-medium text-foreground flex items-center gap-2">
+              <Brain className="h-4 w-4" /> Obsidian Second Brain
+            </p>
+            <p>Markdown notes on your disk (Jay OS). Applications, prep, daily learning.</p>
+          </div>
+          <div className="rounded-lg border bg-card p-3 space-y-1">
+            <p className="font-medium text-foreground flex items-center gap-2">
+              <FolderOpen className="h-4 w-4" /> Knowledge Vault
+            </p>
+            <p>In-app graph: skills, job portals, semantic search for Discovery and agents.</p>
+          </div>
         </div>
       </section>
     </div>

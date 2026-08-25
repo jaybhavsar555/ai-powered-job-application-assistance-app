@@ -198,8 +198,18 @@ export default function VaultPage() {
         </div>
       )}
 
-      <div className="rounded-xl border bg-muted/20 px-4 py-3 text-sm space-y-1">
-        <p className="font-medium">How to use portals</p>
+      <div className="rounded-xl border bg-muted/20 px-4 py-3 text-sm space-y-2">
+        <p className="font-medium">Knowledge Vault (in-app)</p>
+        <p className="text-muted-foreground">
+          Long-term memory inside Career OS: skills, job portals, and semantic search
+          for Discovery and agents. This is not Obsidian — for Markdown notes on your
+          Jay OS folder (applications, prep, daily learning), use{" "}
+          <Link href="/second-brain" className="text-primary hover:underline">
+            Second Brain
+          </Link>
+          .
+        </p>
+        <p className="font-medium pt-1">How to use portals</p>
         <p className="text-muted-foreground">
           Open a portal → search → copy the job posting URL → Import on Jobs.
           Discovery searches ATS career pages first (Greenhouse, Lever, Ashby,

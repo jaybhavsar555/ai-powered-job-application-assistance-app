@@ -1,5 +1,7 @@
 # Obsidian second brain (Jay OS)
 
+**This is separate from Knowledge Vault** (`/vault` in the app). Knowledge Vault stays in Postgres + Qdrant for skills, job portals, and semantic search. Obsidian Second Brain writes Markdown to your local Jay OS folder. Use both.
+
 Career OS can sync applications, interview prep, and daily learning notes into your local Obsidian vault — for example:
 
 `C:\Users\Asus\OneDrive\Desktop\Jay OS`
