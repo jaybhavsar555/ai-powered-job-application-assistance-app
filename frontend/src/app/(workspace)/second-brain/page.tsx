@@ -8,10 +8,16 @@ import {
   FolderOpen,
   RefreshCw,
   Sparkles,
-  AlertCircle,
-  CheckCircle2,
+  Copy,
+  Check,
+  ArrowRight,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import {
+  PageMessageBanner,
+  PageMessage,
+  messageFromError,
+} from "@/components/ui/PageMessageBanner";
 
 interface LearningTrack {
   id: string;
@@ -37,10 +43,11 @@ export default function SecondBrainPage() {
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [banner, setBanner] = useState<PageMessage | null>(null);
   const [minutes, setMinutes] = useState(45);
-  const [trackId, setTrackId] = useState<string>("");
+  const [trackId, setTrackId] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [showSetup, setShowSetup] = useState(false);
 
   const authHeaders = useCallback(
     () => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" }),
@@ -50,13 +57,16 @@ export default function SecondBrainPage() {
   const loadStatus = useCallback(async () => {
     if (!token) return;
     setLoading(true);
-    setError(null);
     try {
       const res = await fetch("/api/v1/obsidian/status", { headers: authHeaders() });
       if (!res.ok) throw new Error("Could not load Obsidian status");
-      setStatus(await res.json());
+      const data = await res.json();
+      setStatus(data);
+      if (data.error && !data.writable) {
+        setShowSetup(true);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load status");
+      setBanner(messageFromError(err, "Could not reach Second Brain API"));
     } finally {
       setLoading(false);
     }
@@ -68,8 +78,7 @@ export default function SecondBrainPage() {
 
   const run = async (path: string, body?: object) => {
     setBusy(true);
-    setError(null);
-    setMessage(null);
+    setBanner(null);
     try {
       const res = await fetch(`/api/v1/obsidian/${path}`, {
         method: "POST",
@@ -82,122 +91,221 @@ export default function SecondBrainPage() {
       }
       setStatus((prev) => ({ ...prev, ...data }));
       if (path === "sync") {
-        setMessage(`Synced ${data.synced ?? 0} application notes into your vault.`);
+        setBanner({
+          tone: "success",
+          title: "Applications synced",
+          detail: `${data.synced ?? 0} notes written under Career OS/Applications in your vault.`,
+        });
       } else if (path === "daily-learning") {
-        setMessage(`Daily learning note ready: ${data.file || "Daily note written"}.`);
+        setBanner({
+          tone: "success",
+          title: "Daily session ready",
+          detail: `Open ${data.file ? "today’s note in Obsidian" : "Career OS/Daily"} and spend your practice block.`,
+        });
       } else if (path === "scaffold") {
-        setMessage("Career OS folders + Dashboard created in your vault.");
+        setBanner({
+          tone: "success",
+          title: "Vault folders ready",
+          detail: "Career OS/Dashboard, Applications, Daily, and Interview Prep are set up.",
+        });
       }
       await loadStatus();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Action failed");
+      setBanner(messageFromError(err, "Action failed"));
     } finally {
       setBusy(false);
     }
   };
 
+  const copyPath = async () => {
+    const path = status?.vault_path;
+    if (!path) return;
+    try {
+      await navigator.clipboard.writeText(path);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const vaultReady = Boolean(status?.configured && status?.writable);
+
   return (
-    <div className="flex-1 p-4 md:p-8 space-y-6 overflow-y-auto">
+    <div className="flex-1 p-4 md:p-8 space-y-6 overflow-y-auto os-scrollbar">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-            <Brain className="h-8 w-8 text-primary" />
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">
+            Local second brain
+          </p>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight flex items-center gap-2">
+            <Brain className="h-7 w-7 text-muted-foreground shrink-0" aria-hidden />
             Second Brain
           </h1>
-          <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-            Sync jobs, JDs, resumes, and status into your Obsidian vault (Jay OS).
-            Generate daily fundamentals practice and interview prep notes when you get shortlisted.
+          <p className="text-sm text-muted-foreground mt-1 max-w-xl">
+            Sync jobs, JDs, resumes, and status into Obsidian. Prep when shortlisted.
+            Practice fundamentals every day.
           </p>
         </div>
         <button
           type="button"
           onClick={() => loadStatus()}
-          className="inline-flex items-center gap-2 text-sm border border-border rounded-md px-3 py-2 hover:bg-muted"
+          disabled={loading || busy}
+          aria-label="Refresh vault status"
+          className="inline-flex items-center gap-2 text-sm border border-border rounded-md px-3 py-2 hover:bg-muted disabled:opacity-50"
         >
-          <RefreshCw className="h-4 w-4" /> Refresh
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          Refresh
         </button>
       </div>
 
-      {error && (
-        <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md p-3">
-          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-          <span>{error}</span>
-        </div>
-      )}
-      {message && (
-        <div className="flex items-start gap-2 text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-md p-3">
-          <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
-          <span>{message}</span>
-        </div>
+      {banner && (
+        <PageMessageBanner message={banner} onDismiss={() => setBanner(null)} />
       )}
 
-      <section className="rounded-xl border bg-card p-5 space-y-3">
-        <h2 className="font-semibold flex items-center gap-2">
-          <FolderOpen className="h-4 w-4" /> Obsidian vault
-        </h2>
+      {/* Status */}
+      <section className="rounded-xl border bg-card p-4 md:p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-semibold flex items-center gap-2 text-sm md:text-base">
+            <FolderOpen className="h-4 w-4 text-muted-foreground" />
+            Obsidian vault
+          </h2>
+          {!loading && (
+            <span
+              className={`text-[11px] font-medium px-2 py-0.5 rounded-md border ${
+                vaultReady
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                  : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+              }`}
+            >
+              {vaultReady ? "Connected" : "Needs setup"}
+            </span>
+          )}
+        </div>
+
         {loading ? (
-          <p className="text-sm text-muted-foreground">Checking vault…</p>
-        ) : (
-          <div className="text-sm space-y-2">
-            <p>
-              <span className="text-muted-foreground">Path: </span>
-              <code className="text-xs bg-muted px-1.5 py-0.5 rounded">
-                {status?.vault_path || "(not set)"}
-              </code>
+          <div className="space-y-2" aria-busy="true">
+            <div className="h-12 rounded-lg bg-muted animate-pulse" />
+            <div className="h-20 rounded-lg bg-muted animate-pulse" />
+          </div>
+        ) : !vaultReady ? (
+          <div className="rounded-lg border border-dashed border-border p-6 text-center space-y-3">
+            <p className="font-medium text-sm">Connect your Obsidian vault</p>
+            <p className="text-sm text-muted-foreground max-w-md mx-auto">
+              Set <code className="text-xs bg-muted px-1 rounded">OBSIDIAN_VAULT_PATH</code> to
+              your Jay OS folder, restart the API, then create folders here.
             </p>
-            <p className="text-muted-foreground">
-              {status?.hint ||
-                "Set OBSIDIAN_VAULT_PATH in backend/.env to your Jay OS folder."}
-            </p>
-            <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-              <span>App notes: {status?.application_notes ?? 0}</span>
-              <span>Daily notes: {status?.daily_notes ?? 0}</span>
-              <span>
-                {status?.writable ? "Writable ✓" : "Not writable — check path / mount"}
-              </span>
+            <div className="flex flex-wrap justify-center gap-2 pt-1">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => run("scaffold")}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50"
+              >
+                Create Career OS folders
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSetup((v) => !v)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-border text-sm hover:bg-muted"
+              >
+                {showSetup ? "Hide setup" : "Show setup steps"}
+              </button>
             </div>
-            <pre className="text-xs bg-muted/40 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">
-{`# backend/.env (Windows host — Jay OS vault)
-OBSIDIAN_VAULT_PATH=C:\\\\Users\\\\Asus\\\\OneDrive\\\\Desktop\\\\Jay OS
-
-# Docker: mount the vault into the API container
-# volumes:
-#   - "C:/Users/Asus/OneDrive/Desktop/Jay OS:/data/obsidian"
-# OBSIDIAN_VAULT_PATH=/data/obsidian`}
-            </pre>
+          </div>
+        ) : (
+          <div className="space-y-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <code className="text-xs bg-muted px-2 py-1.5 rounded-md truncate max-w-full flex-1 min-w-0">
+                {status?.vault_path}
+              </code>
+              <button
+                type="button"
+                onClick={copyPath}
+                className="inline-flex items-center gap-1.5 text-xs border border-border rounded-md px-2.5 py-1.5 hover:bg-muted shrink-0"
+                aria-label="Copy vault path"
+              >
+                {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                <p className="text-[11px] text-muted-foreground uppercase tracking-wider">Applications</p>
+                <p className="text-lg font-semibold tabular-nums">{status?.application_notes ?? 0}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                <p className="text-[11px] text-muted-foreground uppercase tracking-wider">Daily notes</p>
+                <p className="text-lg font-semibold tabular-nums">{status?.daily_notes ?? 0}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/30 px-3 py-2 col-span-2 sm:col-span-1">
+                <p className="text-[11px] text-muted-foreground uppercase tracking-wider">Folder</p>
+                <p className="text-sm font-medium truncate">Career OS/</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button
+                type="button"
+                disabled={busy}
+                aria-busy={busy}
+                onClick={() => run("sync")}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50"
+              >
+                <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
+                Sync all applications
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => run("scaffold")}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-border text-sm hover:bg-muted disabled:opacity-50"
+              >
+                Refresh folders
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSetup((v) => !v)}
+                className="text-sm text-muted-foreground hover:text-foreground px-2"
+              >
+                {showSetup ? "Hide setup" : "Setup help"}
+              </button>
+            </div>
           </div>
         )}
-        <div className="flex flex-wrap gap-2 pt-2">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => run("scaffold")}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted disabled:opacity-50"
-          >
-            Create Career OS folders
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => run("sync")}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50"
-          >
-            <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
-            Sync all applications
-          </button>
-        </div>
+
+        {showSetup && (
+          <div className="rounded-lg border bg-muted/20 p-4 text-sm space-y-2">
+            <p className="font-medium">Setup (once)</p>
+            <ol className="list-decimal pl-5 space-y-1.5 text-muted-foreground">
+              <li>
+                In <code className="text-xs bg-muted px-1 rounded">backend/.env</code> set{" "}
+                <code className="text-xs bg-muted px-1 rounded">OBSIDIAN_VAULT_PATH</code> to your
+                Obsidian vault root (e.g. your Jay OS folder).
+              </li>
+              <li>Restart the API (or Docker compose), then click Create / Sync above.</li>
+              <li>
+                Open that folder in Obsidian — notes land under <code className="text-xs">Career OS/</code>.
+              </li>
+            </ol>
+            <p className="text-xs text-muted-foreground pt-1">
+              Full guide: <code className="text-xs">docs/obsidian_second_brain.md</code> in the repo.
+            </p>
+          </div>
+        )}
       </section>
 
-      <section className="rounded-xl border bg-card p-5 space-y-4">
-        <h2 className="font-semibold flex items-center gap-2">
-          <BookOpen className="h-4 w-4" /> Daily learning
+      {/* Daily learning */}
+      <section className="rounded-xl border bg-card p-4 md:p-5 space-y-4">
+        <h2 className="font-semibold flex items-center gap-2 text-sm md:text-base">
+          <BookOpen className="h-4 w-4 text-muted-foreground" />
+          Daily learning
         </h2>
         <p className="text-sm text-muted-foreground">
-          Spend focused time on core fundamentals and frameworks you already use.
-          Notes land under <code className="text-xs">Career OS/Daily/</code> in Obsidian.
+          A focused block on core fundamentals and frameworks you already use — concepts,
+          code practice, then a resume/interview glue step.
         </p>
-        <div className="flex flex-wrap gap-3 items-end">
-          <label className="text-sm space-y-1">
+        <div className="flex flex-col sm:flex-row flex-wrap gap-3 items-stretch sm:items-end">
+          <label className="text-sm space-y-1.5">
             <span className="text-muted-foreground text-xs">Minutes</span>
             <input
               type="number"
@@ -205,11 +313,11 @@ OBSIDIAN_VAULT_PATH=C:\\\\Users\\\\Asus\\\\OneDrive\\\\Desktop\\\\Jay OS
               max={180}
               value={minutes}
               onChange={(e) => setMinutes(Number(e.target.value) || 45)}
-              className="block w-24 rounded-md border border-border bg-background px-3 py-2 text-sm"
+              className="block w-full sm:w-24 rounded-md border border-border bg-background px-3 py-2 text-sm"
             />
           </label>
-          <label className="text-sm space-y-1 flex-1 min-w-[200px]">
-            <span className="text-muted-foreground text-xs">Track (optional)</span>
+          <label className="text-sm space-y-1.5 flex-1 min-w-[180px]">
+            <span className="text-muted-foreground text-xs">Track</span>
             <select
               value={trackId}
               onChange={(e) => setTrackId(e.target.value)}
@@ -225,47 +333,75 @@ OBSIDIAN_VAULT_PATH=C:\\\\Users\\\\Asus\\\\OneDrive\\\\Desktop\\\\Jay OS
           </label>
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || !vaultReady}
             onClick={() =>
               run("daily-learning", {
                 minutes,
                 track_id: trackId || null,
               })
             }
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
           >
             <Sparkles className="h-4 w-4" />
-            Write today’s session
+            Write today&apos;s session
           </button>
         </div>
+        {!vaultReady && (
+          <p className="text-xs text-muted-foreground">Connect the vault first to write daily notes.</p>
+        )}
       </section>
 
-      <section className="rounded-xl border bg-card p-5 space-y-3 text-sm">
-        <h2 className="font-semibold">How to use this with Jay OS</h2>
-        <ol className="list-decimal pl-5 space-y-2 text-muted-foreground">
-          <li>
-            Point <code className="text-xs">OBSIDIAN_VAULT_PATH</code> at{" "}
-            <code className="text-xs">C:\Users\Asus\OneDrive\Desktop\Jay OS</code>.
+      {/* How it fits the apply loop */}
+      <section className="rounded-xl border bg-card p-4 md:p-5 space-y-3">
+        <h2 className="font-semibold text-sm md:text-base">Your daily loop</h2>
+        <ul className="space-y-3 text-sm text-muted-foreground">
+          <li className="flex gap-3">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-foreground">
+              1
+            </span>
+            <span>
+              Tailor &amp; apply in Career OS, then{" "}
+              <strong className="text-foreground font-medium">Sync all applications</strong>.
+            </span>
           </li>
-          <li>
-            Click <strong>Create Career OS folders</strong> once — creates{" "}
-            <code className="text-xs">Career OS/</code> inside your vault.
+          <li className="flex gap-3">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-foreground">
+              2
+            </span>
+            <span>
+              On Tracker, move a card to{" "}
+              <strong className="text-foreground font-medium">Shortlisted</strong> → open Prep Guide.
+            </span>
           </li>
-          <li>
-            Apply / tailor jobs in Career OS, then <strong>Sync all applications</strong>.
-            Each note stores JD, resume content, ATS, stage, and a <em>My notes</em> section you can edit in Obsidian.
+          <li className="flex gap-3">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-foreground">
+              3
+            </span>
+            <span>
+              Write today&apos;s learning session and spend 30–45 minutes in Obsidian.
+            </span>
           </li>
-          <li>
-            Drag a card to <strong>Shortlisted</strong> or <strong>Interview</strong> on Tracker →{" "}
-            <Link href="/tracker" className="text-primary hover:underline">
-              open Prep Guide
-            </Link>{" "}
-            and regenerate drills; re-sync to write Interview Prep notes.
-          </li>
-          <li>
-            Every day: click <strong>Write today’s session</strong> and spend the block in Obsidian.
-          </li>
-        </ol>
+        </ul>
+        <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
+          <Link
+            href="/tailor"
+            className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+          >
+            Tailor <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+          <Link
+            href="/tracker"
+            className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+          >
+            Tracker <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+          <Link
+            href="/resumes"
+            className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+          >
+            Resume Studio <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
       </section>
     </div>
   );
