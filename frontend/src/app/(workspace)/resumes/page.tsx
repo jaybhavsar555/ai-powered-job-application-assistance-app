@@ -76,6 +76,7 @@ interface StudioDetail extends StudioItem {
 const DOWNLOAD_LABELS: Record<string, string> = {
   resume_pdf: "Resume PDF",
   resume_docx: "Resume DOCX",
+  resume_tex: "Resume LaTeX",
   cover_pdf: "Cover PDF",
   cover_docx: "Cover DOCX",
 };

@@ -16,7 +16,7 @@ from app.infrastructure.db.models import DBApplication, DBJob, DBResumeVersion
 from app.infrastructure.resume_library import extract_text
 
 
-PACKAGE_KINDS = ("resume_pdf", "resume_docx", "cover_pdf", "cover_docx")
+PACKAGE_KINDS = ("resume_pdf", "resume_docx", "resume_tex", "cover_pdf", "cover_docx")
 
 
 def _company_name(job: Optional[DBJob]) -> str:

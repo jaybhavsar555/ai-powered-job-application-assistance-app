@@ -97,6 +97,8 @@ class AnalyzeJDSkillsRequest(BaseModel):
     job_description: str
     job_url: Optional[str] = None
     base_resume: str
+    # Iterative tailor: score the already-tailored text instead of the library file
+    resume_text: Optional[str] = None
 
 @router.post("/analyze-jd-skills")
 async def analyze_jd_skills(
@@ -110,23 +112,27 @@ async def analyze_jd_skills(
 
     cfg = get_settings()
     source_dir = Path(cfg.RESUME_SOURCE_DIR)
-    file_path = source_dir / request.base_resume
 
-    if not file_path.exists():
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Resume file not found: {request.base_resume}. "
-                "Pick a resume from the Tailor dropdown (files under data/resumes)."
-            ),
-        )
+    if request.resume_text and request.resume_text.strip():
+        resume_text = request.resume_text.strip()
+    else:
+        file_path = source_dir / request.base_resume
 
-    resume_text = extract_text(file_path)
-    if not (resume_text or "").strip():
-        raise HTTPException(
-            status_code=422,
-            detail=f"Could not extract text from resume: {request.base_resume}",
-        )
+        if not file_path.exists():
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Resume file not found: {request.base_resume}. "
+                    "Pick a resume from the Tailor dropdown (files under data/resumes)."
+                ),
+            )
+
+        resume_text = extract_text(file_path)
+        if not (resume_text or "").strip():
+            raise HTTPException(
+                status_code=422,
+                detail=f"Could not extract text from resume: {request.base_resume}",
+            )
 
     job_text = (request.job_description or "").strip()
     scrape_source = None

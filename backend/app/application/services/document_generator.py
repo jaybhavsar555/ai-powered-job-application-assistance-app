@@ -95,6 +95,53 @@ class DocumentGenerator:
                 user_name, contact_info, summary, bullets, skills, base_excerpt
             ), None
 
+    def generate_resume_latex(
+        self,
+        user_name: str,
+        contact_info: str,
+        summary: str,
+        bullets: list[str],
+        skills: Optional[list[str]] = None,
+        base_excerpt: Optional[str] = None,
+    ) -> str:
+        """Render ATS-oriented LaTeX source (editable before PDF compile)."""
+        return self._render_resume_latex(
+            user_name, contact_info, summary, bullets, skills, base_excerpt
+        )
+
+    def _render_resume_latex(
+        self,
+        user_name: str,
+        contact_info: str,
+        summary: str,
+        bullets: list[str],
+        skills: Optional[list[str]] = None,
+        base_excerpt: Optional[str] = None,
+    ) -> str:
+        import os
+
+        from jinja2 import Template
+
+        template_path = os.path.join(
+            os.path.dirname(__file__), "..", "templates", "resume_template.tex"
+        )
+        with open(template_path, "r", encoding="utf-8") as f:
+            template_str = f.read()
+
+        template = Template(template_str)
+        return template.render(
+            user_name=self._escape_latex(user_name),
+            contact_info=self._escape_latex(contact_info or ""),
+            summary=self._escape_latex(summary or ""),
+            bullets=[self._escape_latex(b) for b in (bullets or [])],
+            skills=self._escape_latex(", ".join(skills) if skills else ""),
+            base_excerpt_blocks=[
+                self._escape_latex(b) for b in self._split_blocks(base_excerpt, limit=10)
+            ]
+            if base_excerpt
+            else [],
+        )
+
     def _generate_resume_pdf_latex(
         self,
         user_name: str,
@@ -109,29 +156,11 @@ class DocumentGenerator:
         import subprocess
         import tempfile
 
-        from jinja2 import Template
-
         if not shutil.which("pdflatex"):
             raise RuntimeError("pdflatex not found on PATH")
 
-        template_path = os.path.join(
-            os.path.dirname(__file__), "..", "templates", "resume_template.tex"
-        )
-        with open(template_path, "r", encoding="utf-8") as f:
-            template_str = f.read()
-
-        template = Template(template_str)
-        tex_content = template.render(
-            user_name=self._escape_latex(user_name),
-            contact_info=self._escape_latex(contact_info or ""),
-            summary=self._escape_latex(summary or ""),
-            bullets=[self._escape_latex(b) for b in (bullets or [])],
-            skills=self._escape_latex(", ".join(skills) if skills else ""),
-            base_excerpt_blocks=[
-                self._escape_latex(b) for b in self._split_blocks(base_excerpt, limit=10)
-            ]
-            if base_excerpt
-            else [],
+        tex_content = self._render_resume_latex(
+            user_name, contact_info, summary, bullets, skills, base_excerpt
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:

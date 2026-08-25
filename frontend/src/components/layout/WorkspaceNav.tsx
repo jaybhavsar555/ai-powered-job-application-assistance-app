@@ -21,6 +21,7 @@ import {
   ClipboardCheck,
   Sparkles,
   HelpCircle,
+  Wand2,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useModeStore } from "@/store/modeStore";
@@ -30,6 +31,7 @@ type NavItem = { name: string; href: string; icon: typeof LayoutDashboard };
 const simplePrimary: NavItem[] = [
   { name: "Inbox", href: "/inbox", icon: LayoutDashboard },
   { name: "Jobs", href: "/jobs", icon: Store },
+  { name: "Tailor", href: "/tailor", icon: Wand2 },
   { name: "Quick Apply", href: "/quick-apply", icon: Send },
   { name: "Apply", href: "/apply", icon: Sparkles },
   { name: "Resumes", href: "/resumes", icon: FileText },

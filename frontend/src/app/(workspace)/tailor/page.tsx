@@ -7,7 +7,7 @@ import { usePanelStore } from "@/store/panelStore";
 import { useWorkflowStore, SkillImpact } from "@/hooks/useWorkflowStore";
 import {
   CheckCircle, Wand2, X, AlertCircle, ArrowLeft, Download,
-  Eye, RefreshCw, TrendingUp, Zap, Minus, ArrowUp
+  Eye, RefreshCw, TrendingUp, Zap, Minus, ArrowUp, FileCode, FileText
 } from "lucide-react";
 import Link from "next/link";
 import { ResumeComparison } from "@/components/ui/ResumeComparison";
@@ -109,6 +109,9 @@ export default function TailorPage() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [showComparison, setShowComparison] = useState(false);
   const [downloadData, setDownloadData] = useState<any>(null);
+  const [latexPreview, setLatexPreview] = useState<string | null>(null);
+  const [showLatex, setShowLatex] = useState(false);
+  const [loadingLatex, setLoadingLatex] = useState(false);
 
   const authHeaders = useCallback(
     () => ({ Authorization: `Bearer ${token}` }),
@@ -263,28 +266,60 @@ export default function TailorPage() {
   };
 
   const handleDownloadDocx = async (editedData?: any) => {
+    await downloadExport("/api/v1/documents/export/docx", editedData, "Tailored_Resume.docx");
+  };
+
+  const handleDownloadPdf = async (editedData?: any) => {
+    await downloadExport("/api/v1/documents/export/pdf", editedData, "Tailored_Resume.pdf");
+  };
+
+  const handleDownloadTex = async (editedData?: any) => {
+    await downloadExport("/api/v1/documents/export/tex", editedData, "Tailored_Resume.tex");
+  };
+
+  const downloadExport = async (url: string, editedData: any, filename: string) => {
     setIsDownloading(true);
     try {
       const payload = editedData || finalState?.tailored_resume || {};
-      const res = await fetch("/api/v1/documents/export/docx", {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error("Failed to export docx");
+      if (!res.ok) throw new Error(`Failed to export ${filename.split(".").pop()}`);
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = `Tailored_Resume.docx`;
+      a.href = objectUrl;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(objectUrl);
       document.body.removeChild(a);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Download failed");
     } finally {
       setIsDownloading(false);
+    }
+  };
+
+  const loadLatexPreview = async () => {
+    const payload = finalState?.tailored_resume;
+    if (!payload) return;
+    setLoadingLatex(true);
+    try {
+      const res = await fetch("/api/v1/documents/export/tex", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error("Could not generate LaTeX preview");
+      setLatexPreview(await res.text());
+      setShowLatex(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "LaTeX preview failed");
+    } finally {
+      setLoadingLatex(false);
     }
   };
 
@@ -316,11 +351,6 @@ export default function TailorPage() {
     setIsTailoring(true);
     setError(null);
     try {
-      // We call with the tailored text directly via the iterative field
-      // But analyze-jd-skills only takes base_resume (file name).
-      // We use the skill_gap_agent directly by sending text as job_description context trick —
-      // Actually we reuse analyze-jd-skills with the existing base_resume but update the beforeAtsScore
-      // to the afterAtsScore from the last round.
       const res = await fetch("/api/v1/workflows/analyze-jd-skills", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -328,6 +358,7 @@ export default function TailorPage() {
           job_description: jdText,
           job_url: jobUrl,
           base_resume: selectedBaseResume || baseResumes[0]?.name,
+          resume_text: resumeText,
         }),
         signal: AbortSignal.timeout(300_000),
       });
@@ -795,6 +826,32 @@ export default function TailorPage() {
                     Compare
                   </button>
 
+                  {/* LaTeX source */}
+                  <button
+                    type="button"
+                    onClick={() => (showLatex ? setShowLatex(false) : loadLatexPreview())}
+                    disabled={loadingLatex}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-border text-sm font-medium hover:bg-muted transition-all"
+                  >
+                    {loadingLatex ? (
+                      <span className="h-4 w-4 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin" />
+                    ) : (
+                      <FileCode className="h-4 w-4" />
+                    )}
+                    {showLatex ? "Hide LaTeX" : "View LaTeX"}
+                  </button>
+
+                  {/* Download PDF (LaTeX-compiled, ATS-friendly) */}
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadPdf()}
+                    disabled={isDownloading}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-emerald-600/40 text-emerald-600 dark:text-emerald-400 text-sm font-medium hover:bg-emerald-500/10 disabled:opacity-50 transition-all"
+                  >
+                    <FileText className="h-4 w-4" />
+                    PDF
+                  </button>
+
                   {/* Download DOCX */}
                   <button
                     type="button"
@@ -805,10 +862,42 @@ export default function TailorPage() {
                     {isDownloading ? (
                       <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     ) : <Download className="h-4 w-4" />}
-                    Download DOCX
+                    DOCX
+                  </button>
+
+                  {/* Download LaTeX source */}
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadTex()}
+                    disabled={isDownloading}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-border text-sm font-medium hover:bg-muted disabled:opacity-50 transition-all"
+                  >
+                    <FileCode className="h-4 w-4" />
+                    .tex
                   </button>
                 </div>
               </div>
+
+              {showLatex && latexPreview && (
+                <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm mt-4">
+                  <div className="flex items-center justify-between gap-2 p-4 border-b border-border bg-muted/40">
+                    <span className="font-semibold text-sm flex items-center gap-2">
+                      <FileCode className="h-4 w-4" />
+                      LaTeX source (edit locally, then compile with pdflatex)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadTex()}
+                      className="text-xs font-medium text-primary hover:underline"
+                    >
+                      Download .tex
+                    </button>
+                  </div>
+                  <pre className="p-4 text-xs font-mono whitespace-pre-wrap max-h-80 overflow-y-auto text-muted-foreground">
+                    {latexPreview}
+                  </pre>
+                </div>
+              )}
             </div>
           )}
         </div>
