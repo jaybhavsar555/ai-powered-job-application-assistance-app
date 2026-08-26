@@ -166,15 +166,23 @@ class KnowledgeBaseService:
             if key in existing_urls:
                 skipped += 1
                 continue
-            note = (
-                f"ATS career-page host — {portal['title']}. Discovery searches "
-                "company boards here (not LinkedIn). Paste a posting URL into Jobs → Import."
-                if category == "ats_career_page"
-                else (
-                    f"Job posting portal — {portal['title']}. Browse openings, then "
-                    "paste a posting URL into Tracker → Import job."
+            if category == "ats_career_page":
+                note = (
+                    f"ATS career-page host — {portal['title']}. Discovery searches "
+                    "company boards here. Paste a posting URL into Jobs → Import; "
+                    "Chrome extension can autofill on allowlisted ATS."
                 )
-            )
+            elif category == "major_board":
+                note = (
+                    f"Major board — {portal['title']}. Browse there, then paste the "
+                    "posting URL into Jobs → Import or Pipeline. Career OS never "
+                    "silent-submits LinkedIn Easy Apply / Indeed (you click Submit)."
+                )
+            else:
+                note = (
+                    f"Job posting portal — {portal['title']}. Browse openings, then "
+                    "paste a posting URL into Jobs → Import."
+                )
             await self.create(
                 user_id,
                 WikiEntityCreate(

@@ -43,7 +43,8 @@ class DiscoveredJob(BaseModel):
     )
     url: Optional[str] = Field(default=None, description="Canonical job posting URL")
     source: Optional[str] = Field(
-        default=None, description="vault_portals|remotive|remoteok|arbeitnow"
+        default=None,
+        description="vault_portals|remotive|remoteok|arbeitnow|web_search",
     )
     posted_at: Optional[str] = Field(default=None, description="ISO date if known")
 
@@ -586,6 +587,124 @@ class JobDiscoveryAgent:
         )
         return combined[:limit]
 
+    async def fetch_web_search(
+        self,
+        search_term: str,
+        location: str,
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Open-internet job search (career-ops / ai-job-search WebSearch fallback).
+
+        DuckDuckGo HTML/Lite for career/job postings — not limited to Vault hosts.
+        """
+        import urllib.parse
+        from bs4 import BeautifulSoup
+
+        loc = (location or "Remote").strip()
+        term = (search_term or "software engineer").strip()
+        # Bias toward real postings; still open-web (not site:-only)
+        query = f'{term} (job OR careers OR "apply now" OR greenhouse OR lever OR ashby)'
+        if loc and loc.lower() not in ("remote", "any"):
+            query += f' "{loc}"'
+        else:
+            query += " remote"
+        encoded = urllib.parse.quote(query)
+        urls = [
+            f"https://html.duckduckgo.com/html/?q={encoded}&df=m",
+            f"https://lite.duckduckgo.com/lite/?q={encoded}",
+        ]
+        block_hosts = {
+            "duckduckgo.com",
+            "google.com",
+            "bing.com",
+            "youtube.com",
+            "facebook.com",
+            "twitter.com",
+            "x.com",
+            "reddit.com",
+        }
+
+        try:
+            async with httpx.AsyncClient(
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/122.0.0.0 Safari/537.36"
+                    ),
+                    "Accept": "text/html,application/xhtml+xml",
+                },
+                follow_redirects=True,
+                timeout=15.0,
+            ) as client:
+                for url in urls:
+                    try:
+                        response = await client.get(url)
+                    except Exception:
+                        continue
+                    if response.status_code != 200:
+                        continue
+                    soup = BeautifulSoup(response.text, "html.parser")
+                    result_links = soup.select("a.result__a")
+                    if not result_links:
+                        result_links = soup.select("a.result__url")
+                    if not result_links:
+                        result_links = soup.select("a.result-link") or soup.select(
+                            "td a[href^='http']"
+                        )
+                    snippets = soup.select("a.result__snippet") or soup.select(
+                        ".result__snippet"
+                    )
+                    out: List[Dict[str, Any]] = []
+                    for i, a in enumerate(result_links):
+                        if len(out) >= limit:
+                            break
+                        link = a.get("href") or ""
+                        if "uddg=" in link:
+                            link = urllib.parse.unquote(
+                                link.split("uddg=")[1].split("&")[0]
+                            )
+                        elif link.startswith("//"):
+                            link = "https:" + link
+                        elif link.startswith("/"):
+                            continue
+                        if not link.startswith("http"):
+                            continue
+                        host = _portal_host(link)
+                        if not host or any(
+                            host == b or host.endswith("." + b) for b in block_hosts
+                        ):
+                            continue
+                        title = (a.get_text(strip=True) or "").strip()
+                        if not title or title.startswith("http"):
+                            title = f"{term.title()} opening"
+                        snippet = ""
+                        if i < len(snippets):
+                            snippet = snippets[i].get_text(strip=True)
+                        company = _company_from_ats_url(link, host.split(".")[0].title())
+                        out.append(
+                            {
+                                "id": f"web-{abs(hash(link)) % 10_000_000}",
+                                "title": title[:160],
+                                "company_name": company,
+                                "candidate_required_location": loc or "Remote",
+                                "salary": "Competitive",
+                                "url": link,
+                                "description": snippet
+                                or f"Found via open-web search for {term}",
+                                "publication_date": None,
+                                "source": "web_search",
+                            }
+                        )
+                    if out:
+                        logger.info("Open-web search returned %d hits", len(out))
+                        return out
+                return []
+        except Exception as e:
+            logger.error("Open-web search failed: %s", e)
+            return []
+
     async def fetch_live_jobs(
         self,
         target_roles: str,
@@ -604,14 +723,18 @@ class JobDiscoveryAgent:
         vault_limit = max(
             5, int(getattr(settings, "JOB_DISCOVERY_VAULT_LIMIT", 12) or 12)
         )
+        web_limit = max(
+            3, int(getattr(settings, "JOB_DISCOVERY_WEB_LIMIT", 8) or 8)
+        )
         max_results = max(
-            8, int(getattr(settings, "JOB_DISCOVERY_MAX_RESULTS", 15) or 15)
+            8, int(getattr(settings, "JOB_DISCOVERY_MAX_RESULTS", 20) or 20)
         )
         sources = settings.job_discovery_source_list() or [
             "vault_portals",
             "remotive",
             "remoteok",
             "arbeitnow",
+            "web_search",
         ]
 
         vault_sites: List[Dict[str, str]] = []
@@ -628,16 +751,25 @@ class JobDiscoveryAgent:
             "vault_portals": lambda term, lim: self.fetch_vault_portals(
                 term, location, lim, portals=vault_sites
             ),
+            "web_search": lambda term, lim: self.fetch_web_search(
+                term, location, lim
+            ),
         }
-        # Vault KBs first, then remote API boards as fill
-        ordered = [s for s in sources if s == "vault_portals"] + [
-            s for s in sources if s != "vault_portals"
+        # Vault first, boards, then open web as fill (ai-job-search WebSearch pattern)
+        priority = ("vault_portals", "remotive", "remoteok", "arbeitnow", "web_search")
+        ordered = [s for s in priority if s in sources] + [
+            s for s in sources if s not in priority
         ]
         for src in ordered:
             fn = fetchers.get(src)
             if not fn:
                 continue
-            lim = vault_limit if src == "vault_portals" else board_limit
+            if src == "vault_portals":
+                lim = vault_limit
+            elif src == "web_search":
+                lim = web_limit
+            else:
+                lim = board_limit
             try:
                 batch = await fn(search_term, lim)
             except Exception as e:
@@ -657,12 +789,19 @@ class JobDiscoveryAgent:
                 seen_urls.add(key)
                 combined.append(j)
 
-        # Prefer Vault portal hits; fill remaining slots from remote boards
+        # Prefer Vault → boards → web
         vault = [j for j in combined if j.get("source") == "vault_portals"]
-        boards = [j for j in combined if j.get("source") != "vault_portals"]
+        web = [j for j in combined if j.get("source") == "web_search"]
+        boards = [
+            j
+            for j in combined
+            if j.get("source") not in ("vault_portals", "web_search")
+        ]
         keep_vault = min(len(vault), max_results)
-        keep_boards = max(0, max_results - keep_vault)
-        out = vault[:keep_vault] + boards[:keep_boards]
+        remaining = max_results - keep_vault
+        keep_boards = min(len(boards), max(remaining // 2, remaining - len(web)))
+        keep_web = max(0, remaining - keep_boards)
+        out = vault[:keep_vault] + boards[:keep_boards] + web[:keep_web]
         return out[:max_results]
 
     async def discover_and_score_jobs(

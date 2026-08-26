@@ -21,6 +21,7 @@ from app.api.v1.endpoints import (
     screening_qa,
     extension,
     apply_prefs,
+    search_pipeline,
     obsidian,
 )
 
@@ -53,5 +54,8 @@ api_router.include_router(
 )
 api_router.include_router(
     apply_prefs.router, prefix="/apply-prefs", tags=["apply-prefs"]
+)
+api_router.include_router(
+    search_pipeline.router, prefix="/search-pipeline", tags=["search-pipeline"]
 )
 api_router.include_router(obsidian.router, prefix="/obsidian", tags=["obsidian"])

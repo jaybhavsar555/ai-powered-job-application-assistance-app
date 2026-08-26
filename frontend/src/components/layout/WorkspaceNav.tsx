@@ -22,6 +22,7 @@ import {
   Sparkles,
   HelpCircle,
   Wand2,
+  Radar,
   Brain,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
@@ -32,6 +33,7 @@ type NavItem = { name: string; href: string; icon: typeof LayoutDashboard };
 const simplePrimary: NavItem[] = [
   { name: "Inbox", href: "/inbox", icon: LayoutDashboard },
   { name: "Jobs", href: "/jobs", icon: Store },
+  { name: "Pipeline", href: "/pipeline", icon: Radar },
   { name: "Tailor", href: "/tailor", icon: Wand2 },
   { name: "Resumes", href: "/resumes", icon: FileText },
   { name: "Quick Apply", href: "/quick-apply", icon: Send },
@@ -58,6 +60,7 @@ const advancedNavItems: NavItem[] = [
   { name: "Resumes", href: "/resumes", icon: FileText },
   { name: "Apply", href: "/apply", icon: Sparkles },
   { name: "Canvas", href: "/canvas", icon: BrainCircuit },
+  { name: "Pipeline", href: "/pipeline", icon: Radar },
   { name: "Approvals", href: "/approvals", icon: ClipboardCheck },
   { name: "Second Brain", href: "/second-brain", icon: Brain },
   { name: "Knowledge Vault", href: "/vault", icon: Database },
