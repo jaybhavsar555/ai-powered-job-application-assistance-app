@@ -440,6 +440,14 @@ export default function SearchPipelinePage() {
             Scan Vault + boards + web
           </button>
         </div>
+        <p className="text-xs text-muted-foreground">
+          Vault includes LinkedIn, Indeed, Unstop, Instahyre, Wellfound, Naukri,
+          and ATS hosts. Prefer pasting a posting URL via{" "}
+          <Link href="/jobs?import=1" className="text-primary hover:underline">
+            Jobs → Import
+          </Link>{" "}
+          when you already have a link from those sites.
+        </p>
         {run?.sources_used && run.sources_used.length > 0 && (
           <p className="text-xs text-muted-foreground">
             Sources this run: {run.sources_used.join(", ")}

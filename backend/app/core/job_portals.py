@@ -14,6 +14,38 @@ def is_ats_host(host_or_url: str) -> bool:
 
 
 JOB_PORTALS = [
+    # Major boards you browse daily — paste posting URL into Jobs → Import
+    # (LinkedIn Easy Apply is never auto-submitted by Career OS)
+    {
+        "title": "LinkedIn Jobs",
+        "url": "https://www.linkedin.com/jobs/",
+        "region": "Global",
+        "category": "major_board",
+    },
+    {
+        "title": "Indeed",
+        "url": "https://www.indeed.com/",
+        "region": "Global",
+        "category": "major_board",
+    },
+    {
+        "title": "Indeed India",
+        "url": "https://in.indeed.com/",
+        "region": "India",
+        "category": "major_board",
+    },
+    {
+        "title": "Unstop",
+        "url": "https://unstop.com/jobs",
+        "region": "India",
+        "category": "major_board",
+    },
+    {
+        "title": "Naukri",
+        "url": "https://www.naukri.com/",
+        "region": "India",
+        "category": "major_board",
+    },
     {"title": "Remotive", "url": "https://remotive.com/remote-jobs", "region": "Remote"},
     {"title": "RemoteOK", "url": "https://remoteok.com/", "region": "Remote"},
     {"title": "Arbeitnow", "url": "https://www.arbeitnow.com/", "region": "Remote"},
@@ -29,7 +61,7 @@ JOB_PORTALS = [
     {"title": "We Work Remotely", "url": "https://weworkremotely.com/", "region": "Remote"},
     {"title": "FlexJobs", "url": "https://www.flexjobs.com/", "region": "Remote"},
     {"title": "Welcome to the Jungle", "url": "https://app.welcometothejungle.com/jobs", "region": "Global"},
-    # ATS career-page hosts (Tsenta-class Find: company sites, not LinkedIn)
+    # ATS career-page hosts (company sites — best for extension autofill)
     {
         "title": "Greenhouse boards",
         "url": "https://boards.greenhouse.io/",

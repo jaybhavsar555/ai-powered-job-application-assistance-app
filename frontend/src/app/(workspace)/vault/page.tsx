@@ -75,13 +75,13 @@ export default function VaultPage() {
         ats_created?: number;
       }>("/knowledge/me/seed-job-portals");
       const ats = data.ats_created ?? 0;
-      setNotice(
-        data.created > 0
-          ? `Added ${data.created} job portals${
-              ats ? ` (including ${ats} ATS career pages)` : ""
-            } — ${data.skipped} already present.`
-          : `All ${data.total} job portals already in your vault, including Greenhouse / Lever / Ashby / Workday.`
-      );
+        setNotice(
+          data.created > 0
+            ? `Added ${data.created} job portals${
+                ats ? ` (including ${ats} ATS career pages)` : ""
+              } — LinkedIn, Indeed, Unstop, Instahyre, Wellfound, and more. ${data.skipped} already present.`
+            : `All ${data.total} job portals already in your vault (LinkedIn / Indeed / Unstop / Greenhouse / …).`
+        );
       await fetchEntities();
     } catch (err: unknown) {
       setError(getApiErrorMessage(err, "Failed to seed job portals"));
@@ -211,11 +211,11 @@ export default function VaultPage() {
         </p>
         <p className="font-medium pt-1">How to use portals</p>
         <p className="text-muted-foreground">
-          Open a portal → search → copy the job posting URL → Import on Jobs.
-          Discovery searches ATS career pages first (Greenhouse, Lever, Ashby,
-          Workday), then other Vault portals, then Remotive / RemoteOK /
-          Arbeitnow. Seed portals here so Find stays aligned. We do not crawl
-          50k company sites or silent-submit.
+          Includes LinkedIn, Indeed, Unstop, Instahyre, Wellfound, Naukri, and
+          company ATS pages (Greenhouse / Lever / Ashby / Workday). Open a
+          portal → copy the posting URL → Jobs → Import (or Pipeline). Discovery
+          searches ATS hosts + Vault portals + boards. LinkedIn / Indeed are for
+          bookmark + paste — we never silent Easy Apply.
         </p>
         <div className="flex flex-wrap gap-2 pt-1">
           <Link
@@ -226,10 +226,16 @@ export default function VaultPage() {
             Import job URL
           </Link>
           <Link
+            href="/pipeline"
+            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted"
+          >
+            Search Pipeline
+          </Link>
+          <Link
             href="/discovery"
             className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted"
           >
-            Or use Discovery
+            Discovery
           </Link>
         </div>
       </div>
