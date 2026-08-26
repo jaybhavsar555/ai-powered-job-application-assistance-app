@@ -1,7 +1,9 @@
 "use client";
 
 import React from "react";
-import { Terminal } from "lucide-react";
+import { FileText, Terminal, Wand2 } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { WorkspaceNav } from "./WorkspaceNav";
 import { InspectorPanel } from "./InspectorPanel";
 import { TerminalLog } from "./TerminalLog";
@@ -9,6 +11,7 @@ import { useTerminalStore } from "@/store/terminal";
 
 export function WorkspaceLayout({ children }: { children: React.ReactNode }) {
   const { open, toggleTerminal } = useTerminalStore();
+  const pathname = usePathname();
 
   return (
     <div className="flex h-screen w-full bg-background overflow-hidden text-foreground">
@@ -17,10 +20,28 @@ export function WorkspaceLayout({ children }: { children: React.ReactNode }) {
       <div className="flex flex-col flex-1 min-w-0 border-l border-r border-border">
         <header className="flex h-14 items-center justify-between border-b border-border bg-muted/20 px-4 gap-3">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="font-semibold text-sm truncate">Application #9021</span>
-            <span className="text-muted-foreground text-xs bg-muted px-2 py-0.5 rounded shrink-0">
-              Active
-            </span>
+            <Link
+              href="/tailor"
+              className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium border transition-colors ${
+                pathname.startsWith("/tailor")
+                  ? "border-primary/40 bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}
+            >
+              <Wand2 className="h-3.5 w-3.5" />
+              Tailor JD
+            </Link>
+            <Link
+              href="/resumes"
+              className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium border transition-colors ${
+                pathname.startsWith("/resumes")
+                  ? "border-primary/40 bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}
+            >
+              <FileText className="h-3.5 w-3.5" />
+              Resume Studio
+            </Link>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button

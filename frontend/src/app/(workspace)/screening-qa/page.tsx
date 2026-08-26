@@ -70,7 +70,7 @@ export default function ScreeningQAPage() {
   const [tags, setTags] = useState("");
   const [saving, setSaving] = useState(false);
   const [seeding, setSeeding] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [, setDeletingId] = useState<string | null>(null);
 
   const fetchItems = useCallback(async () => {
     setLoading(true);

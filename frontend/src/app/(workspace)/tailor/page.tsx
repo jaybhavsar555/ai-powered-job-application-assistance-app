@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { useAuthStore } from "@/store/auth";
+import { apiFetch } from "@/lib/api";
 import { usePanelStore } from "@/store/panelStore";
 import { useWorkflowStore, SkillImpact } from "@/hooks/useWorkflowStore";
 import {
@@ -129,7 +130,7 @@ export default function TailorPage() {
   const previewResume = useCallback(async (name: string) => {
     if (!token) return;
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/documents/library-preview?name=${encodeURIComponent(name)}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -155,19 +156,19 @@ export default function TailorPage() {
     if (!token) return;
     const fetchLibrary = async () => {
       try {
-        const res = await fetch("/api/v1/documents/resume-library", { headers: authHeaders() });
+        const res = await apiFetch("/api/v1/documents/resume-library", { headers: authHeaders() });
         if (res.ok) {
           const data = await res.json();
           const files = data.files || [];
           setBaseResumes(files);
-          if (files[0] && !selectedBaseResume) setSelectedBaseResume(files[0].name);
+          if (files[0] && !selectedBaseResume) setTailorState({ selectedBaseResume: files[0].name });
         }
       } catch { setError("Failed to load templates."); }
       finally { setLoading(false); }
     };
     fetchLibrary();
     return () => { closePdf(); };
-  }, [token, authHeaders]);
+  }, [token, authHeaders, closePdf, selectedBaseResume, setTailorState]);
 
   const handleAnalyzeJd = async () => {
     if (!jdText.trim() && !jobUrl.trim()) {
@@ -178,7 +179,7 @@ export default function TailorPage() {
     setError(null);
     setScrapeWarning(null);
     try {
-      const res = await fetch("/api/v1/workflows/analyze-jd-skills", {
+      const res = await apiFetch("/api/v1/workflows/analyze-jd-skills", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
@@ -253,7 +254,7 @@ export default function TailorPage() {
       if (iterativeMode && iterativeTailoredText) {
         body.current_tailored_text = iterativeTailoredText;
       }
-      const res = await fetch("/api/v1/workflows/tailor-resume", {
+      const res = await apiFetch("/api/v1/workflows/tailor-resume", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify(body),
@@ -293,7 +294,7 @@ export default function TailorPage() {
     setSavingStudio(true);
     setError(null);
     try {
-      const res = await fetch("/api/v1/resumes/studio/save-tailor", {
+      const res = await apiFetch("/api/v1/resumes/studio/save-tailor", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
@@ -345,7 +346,7 @@ export default function TailorPage() {
     setIsDownloading(true);
     try {
       const payload = editedData || finalState?.tailored_resume || {};
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify(payload),
@@ -372,7 +373,7 @@ export default function TailorPage() {
     if (!payload) return;
     setLoadingLatex(true);
     try {
-      const res = await fetch("/api/v1/documents/export/tex", {
+      const res = await apiFetch("/api/v1/documents/export/tex", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify(payload),
@@ -415,7 +416,7 @@ export default function TailorPage() {
     setIsTailoring(true);
     setError(null);
     try {
-      const res = await fetch("/api/v1/workflows/analyze-jd-skills", {
+      const res = await apiFetch("/api/v1/workflows/analyze-jd-skills", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
@@ -481,24 +482,27 @@ export default function TailorPage() {
 
   return (
     <div className="flex-1 flex flex-col h-full bg-background overflow-hidden relative">
-      <header className="border-b bg-card/80 backdrop-blur sticky top-0 z-20 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link href="/resumes" className="p-2 rounded-full hover:bg-muted text-muted-foreground transition-colors">
+      <header className="border-b bg-card/80 backdrop-blur sticky top-0 z-20 px-4 md:px-6 py-3 md:py-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3 md:gap-4 min-w-0">
+          <Link
+            href="/resumes"
+            aria-label="Back to Resume Studio"
+            className="p-2 rounded-md hover:bg-muted text-muted-foreground transition-colors shrink-0"
+          >
             <ArrowLeft className="w-5 h-5" />
           </Link>
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold tracking-tight">Tailor Resume</h1>
-            <p className="text-sm text-muted-foreground">
-              {step === 1 && "Step 1 of 3 — Select Template & JD"}
-              {step === 2 && `Step 2 of 3 — ${iterativeMode ? "Improve Further" : "Review Missing Skills"}`}
-              {step === 3 && "Step 3 of 3 — Review & Download"}
+          <div className="min-w-0">
+            <h1 className="text-xl md:text-2xl font-bold tracking-tight truncate">Tailor Resume</h1>
+            <p className="text-xs md:text-sm text-muted-foreground" aria-current="step">
+              {step === 1 && "Step 1 of 3 — Template & job description"}
+              {step === 2 && `Step 2 of 3 — ${iterativeMode ? "Improve further" : "Review missing skills"}`}
+              {step === 3 && "Step 3 of 3 — Edit, save & download"}
             </p>
           </div>
         </div>
-        {/* ATS before score badge in header when in step 2+ */}
         {step >= 2 && beforeAtsScore !== null && (
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">ATS Before:</span>
+          <div className="flex items-center gap-2 text-sm shrink-0">
+            <span className="text-muted-foreground">ATS before</span>
             <span className={`font-bold tabular-nums ${beforeAtsScore >= 80 ? "text-emerald-500" : beforeAtsScore >= 60 ? "text-amber-500" : "text-red-500"}`}>
               {beforeAtsScore}
             </span>
@@ -521,21 +525,41 @@ export default function TailorPage() {
           {/* ── STEP 1 ── */}
           {step === 1 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="rounded-lg border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+                After analyze you get skill-gap review, a structured editor, ATS parser checks,
+                Save to Studio, and LaTeX/PDF download — not just a rewritten blob.
+              </div>
               <div className="space-y-2">
                 <label className="text-sm font-semibold">Master template</label>
-                <p className="text-xs text-muted-foreground mb-2">Select a base resume. A live preview will appear on the right side panel.</p>
-                <select
-                  value={selectedBaseResume}
-                  onChange={(e) => setSelectedBaseResume(e.target.value)}
-                  className="w-full p-3.5 rounded-lg border bg-card text-sm shadow-sm transition-all focus:ring-2 focus:ring-primary/20"
-                >
-                  {baseResumes.map((r) => (
-                    <option key={r.name} value={r.name}>
-                      [{roleLabel(r.role_hint)}] {shortName(r.name)}
-                    </option>
-                  ))}
-                  {baseResumes.length === 0 && <option value="">No templates found</option>}
-                </select>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Select a base resume. Preview appears in the side panel when available.
+                </p>
+                {baseResumes.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border p-6 text-center space-y-3">
+                    <p className="text-sm font-medium">No templates in your library</p>
+                    <p className="text-xs text-muted-foreground">
+                      Upload a PDF or DOCX in Resume Studio, then come back to tailor.
+                    </p>
+                    <Link
+                      href="/resumes"
+                      className="inline-flex items-center justify-center px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium"
+                    >
+                      Open Resume Studio
+                    </Link>
+                  </div>
+                ) : (
+                  <select
+                    value={selectedBaseResume}
+                    onChange={(e) => setSelectedBaseResume(e.target.value)}
+                    className="w-full p-3.5 rounded-lg border bg-card text-sm shadow-sm transition-all focus:ring-2 focus:ring-primary/20"
+                  >
+                    {baseResumes.map((r) => (
+                      <option key={r.name} value={r.name}>
+                        [{roleLabel(r.role_hint)}] {shortName(r.name)}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -895,25 +919,24 @@ export default function TailorPage() {
               )}
 
               {/* Action buttons */}
-              <div className="flex flex-wrap justify-between items-center gap-3 pt-4 border-t border-border mt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTailorState({ iterativeMode: false, iterativeTailoredText: "", previouslyAddedSkills: [] });
-                    setStep(1);
-                  }}
-                  className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground"
-                >
-                  Start Over
-                </button>
-
+              <div className="flex flex-col gap-3 pt-4 border-t border-border mt-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* Save to Studio */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTailorState({ iterativeMode: false, iterativeTailoredText: "", previouslyAddedSkills: [] });
+                      setStep(1);
+                    }}
+                    className="px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    Start over
+                  </button>
+                  <div className="flex-1" />
                   <button
                     type="button"
                     onClick={() => handleSaveToStudio(false)}
                     disabled={savingStudio}
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-primary/40 text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-50"
+                    className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-border text-sm font-medium hover:bg-muted disabled:opacity-50"
                   >
                     {savingStudio ? (
                       <span className="h-4 w-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
@@ -923,80 +946,71 @@ export default function TailorPage() {
                     Save to Studio
                   </button>
                   {studioSavedId && (
-                    <Link href="/resumes" className="text-xs text-emerald-600 hover:underline">
-                      Saved — open Studio
+                    <Link href="/resumes" className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline">
+                      Open Studio
                     </Link>
                   )}
-
-                  {/* Improve Further */}
                   <button
                     type="button"
                     onClick={handleImproveFurther}
                     disabled={isTailoring}
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-primary/40 text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-50 transition-all"
+                    className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-border text-sm font-medium hover:bg-muted disabled:opacity-50"
                   >
                     <RefreshCw className="h-4 w-4" />
-                    Improve Further
+                    Improve
                   </button>
-
-                  {/* Compare & Download */}
                   <button
                     type="button"
                     onClick={handleApproveAndPreview}
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-border text-sm font-medium hover:bg-muted transition-all"
+                    className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-border text-sm font-medium hover:bg-muted"
                   >
                     <Eye className="h-4 w-4" />
                     Compare
                   </button>
-
-                  {/* LaTeX source */}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() => (showLatex ? setShowLatex(false) : loadLatexPreview())}
                     disabled={loadingLatex}
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-border text-sm font-medium hover:bg-muted transition-all"
+                    className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-border text-sm font-medium hover:bg-muted"
                   >
                     {loadingLatex ? (
                       <span className="h-4 w-4 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin" />
                     ) : (
                       <FileCode className="h-4 w-4" />
                     )}
-                    {showLatex ? "Hide LaTeX" : "View LaTeX"}
+                    {showLatex ? "Hide LaTeX" : "Edit LaTeX"}
                   </button>
-
-                  {/* Download PDF (LaTeX-compiled, ATS-friendly) */}
-                  <button
-                    type="button"
-                    onClick={() => handleDownloadPdf()}
-                    disabled={isDownloading}
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-emerald-600/40 text-emerald-600 dark:text-emerald-400 text-sm font-medium hover:bg-emerald-500/10 disabled:opacity-50 transition-all"
-                  >
-                    <FileText className="h-4 w-4" />
-                    PDF
-                  </button>
-
-                  {/* Download DOCX */}
-                  <button
-                    type="button"
-                    onClick={() => handleDownloadDocx()}
-                    disabled={isDownloading}
-                    className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold shadow-md hover:bg-emerald-700 disabled:opacity-50 transition-all hover:-translate-y-0.5 active:translate-y-0"
-                  >
-                    {isDownloading ? (
-                      <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    ) : <Download className="h-4 w-4" />}
-                    DOCX
-                  </button>
-
-                  {/* Download LaTeX source */}
                   <button
                     type="button"
                     onClick={() => handleDownloadTex()}
                     disabled={isDownloading}
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-border text-sm font-medium hover:bg-muted disabled:opacity-50 transition-all"
+                    className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-border text-sm font-medium hover:bg-muted disabled:opacity-50"
                   >
-                    <FileCode className="h-4 w-4" />
                     .tex
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadPdf()}
+                    disabled={isDownloading}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md border border-emerald-600/40 text-emerald-600 dark:text-emerald-400 text-sm font-medium hover:bg-emerald-500/10 disabled:opacity-50"
+                  >
+                    <FileText className="h-4 w-4" />
+                    PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadDocx()}
+                    disabled={isDownloading}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    {isDownloading ? (
+                      <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}
+                    DOCX
                   </button>
                 </div>
               </div>

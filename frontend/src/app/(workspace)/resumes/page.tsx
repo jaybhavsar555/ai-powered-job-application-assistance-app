@@ -17,6 +17,7 @@ import {
   Workflow,
   Search,
   ChevronDown,
+  FileCode,
   Library,
   Package,
   MoreVertical,
@@ -24,7 +25,10 @@ import {
 } from "lucide-react";
 import { StructuredResumeEditor, StructuredResumeData } from "@/components/ui/StructuredResumeEditor";
 import { useAuthStore } from "@/store/auth";
+import { apiFetch } from "@/lib/api";
 import { usePanelStore } from "@/store/panelStore";
+import { useWorkflowStore } from "@/hooks/useWorkflowStore";
+import { useRouter } from "next/navigation";
 
 interface BaseResume {
   name: string;
@@ -124,8 +128,8 @@ export default function ResumesPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailSaving, setDetailSaving] = useState(false);
   const token = useAuthStore((s) => s.token);
-  const [selectedBaseResume, setSelectedBaseResume] = useState<string | null>(null);
-  const [showTailorModal, setShowTailorModal] = useState(false);
+  const router = useRouter();
+  const setTailorState = useWorkflowStore((s) => s.setTailorState);
 
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -149,7 +153,7 @@ export default function ResumesPage() {
   const previewResume = async (name: string) => {
     if (!token) return;
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/documents/library-preview?name=${encodeURIComponent(name)}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -185,8 +189,8 @@ export default function ResumesPage() {
       setError(null);
 
       const [libRes, studioRes] = await Promise.all([
-        fetch("/api/v1/documents/resume-library", { headers: authHeaders() }),
-        fetch("/api/v1/resumes/studio", { headers: authHeaders() }),
+        apiFetch("/api/v1/documents/resume-library", { headers: authHeaders() }),
+        apiFetch("/api/v1/resumes/studio", { headers: authHeaders() }),
       ]);
 
       if (libRes.ok) {
@@ -276,7 +280,7 @@ export default function ResumesPage() {
     setDetailSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/v1/resumes/studio/${encodeURIComponent(selectedId)}/content`, {
+      const res = await apiFetch(`/api/v1/resumes/studio/${encodeURIComponent(selectedId)}/content`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ tailored_resume: data, rescore }),
@@ -307,7 +311,7 @@ export default function ResumesPage() {
     setDetailLoading(true);
     setDetail(null);
     try {
-      const res = await fetch(`/api/v1/resumes/studio/${encodeURIComponent(id)}`, {
+      const res = await apiFetch(`/api/v1/resumes/studio/${encodeURIComponent(id)}`, {
         headers: authHeaders(),
       });
       if (!res.ok) {
@@ -333,7 +337,7 @@ export default function ResumesPage() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch("/api/v1/documents/upload", {
+      const res = await apiFetch("/api/v1/documents/upload", {
         method: "POST",
         headers: authHeaders(),
         body: formData,
@@ -358,7 +362,7 @@ export default function ResumesPage() {
 
   const downloadWithAuth = async (path: string, filename: string) => {
     try {
-      const res = await fetch(path, { headers: authHeaders() });
+      const res = await apiFetch(path, { headers: authHeaders() });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(
@@ -382,7 +386,7 @@ export default function ResumesPage() {
   const deleteStudioItem = async (id: string, isApproved: boolean) => {
     if (!confirm(`Are you sure you want to delete this ${isApproved ? "version" : "draft"}?`)) return;
     try {
-      const res = await fetch(`/api/v1/resumes/studio/${encodeURIComponent(id)}`, {
+      const res = await apiFetch(`/api/v1/resumes/studio/${encodeURIComponent(id)}`, {
         method: "DELETE",
         headers: authHeaders(),
       });
@@ -437,7 +441,7 @@ export default function ResumesPage() {
                 Resume Studio
               </h1>
               <p className="text-sm text-muted-foreground mt-1">
-                Tailor · compare · download packages — templates stay in the library drawer.
+                Upload templates, tailor to a JD, edit sections, compare, and download PDF/DOCX/LaTeX.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -543,6 +547,58 @@ export default function ResumesPage() {
       </header>
 
       <div className="flex-1 px-4 md:px-6 py-5 max-w-7xl mx-auto w-full space-y-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+          {[
+            {
+              href: "/tailor",
+              icon: <Wand2 className="h-4 w-4" />,
+              title: "Tailor to a JD",
+              desc: "ATS score, skill gaps, then generate",
+            },
+            {
+              href: "/tailor",
+              icon: <FileText className="h-4 w-4" />,
+              title: "Section editor",
+              desc: "Edit summary, bullets, keywords",
+            },
+            {
+              href: "/tailor",
+              icon: <FileCode className="h-4 w-4" />,
+              title: "LaTeX / PDF",
+              desc: "Preview TeX and export ATS-friendly PDF",
+            },
+            {
+              title: "Compare versions",
+              icon: <Columns2 className="h-4 w-4" />,
+              desc: "Original vs tailored + parser checks",
+              onClick: () => setView(items.length ? "compare" : "tailored"),
+            },
+          ].map((card) => {
+            const inner = (
+              <>
+                <p className="text-xs font-semibold flex items-center gap-1.5">
+                  {card.icon}
+                  {card.title}
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-1 leading-snug">{card.desc}</p>
+              </>
+            );
+            const cls =
+              "rounded-lg border bg-card p-3 text-left hover:border-primary/40 transition-colors";
+            if (card.href) {
+              return (
+                <Link key={card.title} href={card.href} className={cls}>
+                  {inner}
+                </Link>
+              );
+            }
+            return (
+              <button key={card.title} type="button" className={cls} onClick={card.onClick}>
+                {inner}
+              </button>
+            );
+          })}
+        </div>
         {error && (
           <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm flex items-start gap-2">
             <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -846,7 +902,7 @@ export default function ResumesPage() {
                                 title="Download"
                                 onClick={async () => {
                                   if (!token) return;
-                                  const res = await fetch(
+                                  const res = await apiFetch(
                                     `/api/v1/documents/library-file?name=${encodeURIComponent(resume.name)}`,
                                     {
                                       headers: {
@@ -870,9 +926,10 @@ export default function ResumesPage() {
                               <button
                                 type="button"
                                 title="Use for Tailor JD"
+                                aria-label="Use for Tailor JD"
                                 onClick={() => {
-                                  setSelectedBaseResume(resume.name);
-                                  setShowTailorModal(true);
+                                  setTailorState({ selectedBaseResume: resume.name, step: 1 });
+                                  router.push("/tailor");
                                 }}
                                 className="p-2 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
                               >
@@ -989,18 +1046,18 @@ export default function ResumesPage() {
                     <p className="text-xs text-muted-foreground">
                       {detail.original.label}
                     </p>
-                    <pre className="text-xs whitespace-pre-wrap max-h-72 overflow-y-auto font-mono text-muted-foreground">
+                    <div className="text-sm leading-relaxed whitespace-pre-wrap max-h-72 overflow-y-auto os-scrollbar text-muted-foreground">
                       {detail.original.text}
-                    </pre>
+                    </div>
                   </div>
                   <div className="rounded-lg border p-3 space-y-2">
                     <h3 className="text-sm font-semibold">Tailored</h3>
                     <p className="text-xs text-muted-foreground">
                       {detail.approved ? "Saved version" : "Workflow draft"}
                     </p>
-                    <pre className="text-xs whitespace-pre-wrap max-h-72 overflow-y-auto font-mono">
+                    <div className="text-sm leading-relaxed whitespace-pre-wrap max-h-72 overflow-y-auto os-scrollbar">
                       {detail.tailored.preview || "No tailored content yet."}
-                    </pre>
+                    </div>
                   </div>
                 </div>
 
@@ -1094,18 +1151,18 @@ function IconBtn({
 function EmptyTailored({ onLibrary }: { onLibrary: () => void }) {
   return (
     <div className="rounded-xl border border-dashed p-8 text-center space-y-3">
-      <CheckCircle className="mx-auto h-8 w-8 text-muted-foreground opacity-50" />
-      <p className="font-medium">No tailored versions yet</p>
-      <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-        Run Canvas on a job and approve the resume — or tailor a JD from a library
-        template. We never invent ATS scores.
+      <Wand2 className="mx-auto h-8 w-8 text-primary opacity-80" />
+      <p className="font-medium">Start with Tailor — then versions land here</p>
+      <p className="text-sm text-muted-foreground max-w-md mx-auto">
+        Pick a library template, paste a JD, review skill gaps, edit sections, save to
+        Studio, and download PDF/DOCX/LaTeX. Canvas is optional for the full agent loop.
       </p>
       <div className="flex flex-wrap justify-center gap-2 pt-2">
         <Link
-          href="/canvas"
+          href="/tailor"
           className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm"
         >
-          <Workflow className="h-4 w-4" /> Open Canvas
+          <Wand2 className="h-4 w-4" /> Tailor a JD
         </Link>
         <button
           type="button"
@@ -1114,6 +1171,12 @@ function EmptyTailored({ onLibrary }: { onLibrary: () => void }) {
         >
           <Library className="h-4 w-4" /> Browse library
         </button>
+        <Link
+          href="/canvas"
+          className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted"
+        >
+          <Workflow className="h-4 w-4" /> Canvas
+        </Link>
       </div>
     </div>
   );

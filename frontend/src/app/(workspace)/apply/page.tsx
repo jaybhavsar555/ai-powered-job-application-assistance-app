@@ -18,6 +18,7 @@ import {
   Send,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import { apiFetch } from "@/lib/api";
 import {
   PageMessage,
   PageMessageBanner,
@@ -163,7 +164,7 @@ export default function ApplyStudioPage() {
       setBusy(true);
       setMessage(null);
       try {
-        const res = await fetch("/api/v1/apply-sessions/start", {
+        const res = await apiFetch("/api/v1/apply-sessions/start", {
           method: "POST",
           headers: authHeaders(),
           body: JSON.stringify(body),
@@ -200,7 +201,7 @@ export default function ApplyStudioPage() {
         if (appIdParam || jobIdParam) {
           setBusy(true);
           setMessage(null);
-          const res = await fetch("/api/v1/apply-sessions/start", {
+          const res = await apiFetch("/api/v1/apply-sessions/start", {
             method: "POST",
             headers: {
               Authorization: `Bearer ${token}`,
@@ -230,7 +231,7 @@ export default function ApplyStudioPage() {
           }
           return;
         }
-        const res = await fetch("/api/v1/jobs/", {
+        const res = await apiFetch("/api/v1/jobs/", {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
@@ -277,7 +278,7 @@ export default function ApplyStudioPage() {
     async (fields: Record<string, string>) => {
       if (!session) return;
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `/api/v1/apply-sessions/${session.application_id}/fields`,
           {
             method: "PATCH",
@@ -310,7 +311,7 @@ export default function ApplyStudioPage() {
 
   const downloadWithAuth = async (path: string, filename: string) => {
     try {
-      const res = await fetch(path, { headers: authHeaders() });
+      const res = await apiFetch(path, { headers: authHeaders() });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(
@@ -346,7 +347,7 @@ export default function ApplyStudioPage() {
     setMessage(null);
     try {
       window.open(session.job_url, "_blank", "noopener,noreferrer");
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/apply-sessions/${session.application_id}/confirm-submitted`,
         { method: "POST", headers: authHeaders() }
       );

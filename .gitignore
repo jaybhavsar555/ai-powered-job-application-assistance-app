@@ -20,6 +20,7 @@ frontend/.env.*.local
 
 # Build / cache
 frontend/.next/
+frontend/frontend/
 frontend/out/
 frontend/dist/
 backend/**/__pycache__/

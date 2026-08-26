@@ -15,6 +15,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import { apiFetch } from "@/lib/api";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -48,9 +49,7 @@ export default function JobsPage() {
     try {
       setLoading(true);
       setLoadError(null);
-      const res = await fetch("/api/v1/jobs/", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiFetch("/api/v1/jobs/");
       if (!res.ok) {
         throw new Error(
           res.status === 401
@@ -69,7 +68,7 @@ export default function JobsPage() {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     if (token) void fetchJobs();
@@ -92,11 +91,10 @@ export default function JobsPage() {
     if (!importUrl && !importRaw) return;
     setImporting(true);
     try {
-      const res = await fetch("/api/v1/jobs/ingest", {
+      const res = await apiFetch("/api/v1/jobs/ingest", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           url: importUrl || null,
@@ -125,11 +123,10 @@ export default function JobsPage() {
     setActionError(null);
     setActionMessage(null);
     try {
-      const res = await fetch("/api/v1/documents/apply-package", {
+      const res = await apiFetch("/api/v1/documents/apply-package", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ job_id: jobId }),
       });
@@ -162,7 +159,7 @@ export default function JobsPage() {
         <div>
           <h1 className="text-4xl font-bold tracking-tight mb-2">Jobs</h1>
           <p className="text-muted-foreground text-lg">
-            Wishlist roles from Discovery, then: Canvas → Package → Outreach.
+            Wishlist roles, then: Tailor resume → Resume Studio → Package → Apply.
           </p>
         </div>
         <button
@@ -176,9 +173,13 @@ export default function JobsPage() {
       {jobs.length > 0 && (
         <div className="rounded-xl border bg-muted/20 px-4 py-3 text-sm flex flex-wrap items-center gap-x-4 gap-y-2">
           <span className="font-medium">Next steps</span>
-          <span className="text-muted-foreground">1. Canvas (tailor)</span>
-          <span className="text-muted-foreground">2. Package (PDF/DOCX)</span>
-          <span className="text-muted-foreground">3. Outreach / Tracker</span>
+          <Link href="/tailor" className="text-primary hover:underline">
+            1. Tailor JD
+          </Link>
+          <Link href="/resumes" className="text-primary hover:underline">
+            2. Resume Studio
+          </Link>
+          <span className="text-muted-foreground">3. Package / Apply</span>
           <Link href="/tracker" className="text-primary hover:underline ml-auto">
             Open Tracker →
           </Link>
@@ -300,6 +301,12 @@ export default function JobsPage() {
                         className="inline-flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-2.5 py-1.5 text-xs font-medium"
                       >
                         Review &amp; Apply
+                      </Link>
+                      <Link
+                        href="/tailor"
+                        className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
+                      >
+                        Tailor
                       </Link>
                       <Link
                         href={`/canvas?job_id=${encodeURIComponent(job.id)}`}

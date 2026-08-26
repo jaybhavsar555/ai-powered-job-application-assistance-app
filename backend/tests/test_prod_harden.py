@@ -84,6 +84,7 @@ async def test_ingest_inbox_and_message_send(monkeypatch):
         assert summary["wishlist_count"] >= 1
         assert summary["next_action"] is not None
         assert summary["next_action"]["ats_score"] == 81
+        assert summary.get("digest", {}).get("summary_lines")
 
         company_id = uuid4()
         recruiter_id = uuid4()
