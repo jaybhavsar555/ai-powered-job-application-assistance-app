@@ -121,6 +121,10 @@ class Settings(BaseSettings):
     LOOP_ENGINEER_ENABLED: bool = True
     LOOP_ENGINEER_INTERVAL_HOURS: int = 24
     LOOP_ENGINEER_TICK_MINUTES: int = 30
+    LOOP_ENGINEER_AUTO_PACKET_MIN_SCORE: int = 70
+    LOOP_ENGINEER_NOTIFY_EMAIL: bool = True
+    LOOP_ENGINEER_AUTO_BUILD_PACKETS: bool = True
+    LOOP_ENGINEER_FRONTEND_URL: str = "http://localhost:3000"
 
     model_config = SettingsConfigDict(
         env_file=".env",

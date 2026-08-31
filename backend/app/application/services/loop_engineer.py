@@ -80,6 +80,8 @@ class LoopEngineerService:
                 "workAuthorization": "",
             },
             "resume_refresh_hint": True,
+            "auto_build_packets": True,
+            "notify_email": True,
             "philosophy": (
                 "Loop Engineer scans on a schedule, scores with your local/cloud LLM, "
                 "then waits for your shortlist approval in Pipeline — no silent apply."
@@ -205,6 +207,10 @@ class LoopEngineerService:
             current["watchlist_only"] = bool(patch["watchlist_only"])
         if "resume_refresh_hint" in patch:
             current["resume_refresh_hint"] = bool(patch["resume_refresh_hint"])
+        if "auto_build_packets" in patch:
+            current["auto_build_packets"] = bool(patch["auto_build_packets"])
+        if "notify_email" in patch:
+            current["notify_email"] = bool(patch["notify_email"])
         if isinstance(patch.get("preferences"), dict):
             current["preferences"] = {**current["preferences"], **patch["preferences"]}
         path = _user_schedule_path(user_id)
@@ -289,18 +295,49 @@ class LoopEngineerService:
             pipeline._save(user_id, run)
             job_count = len(run.get("jobs") or [])
             self._record_run(user_id, run_id=run.get("id"), job_count=job_count)
+
+            schedule = self.get_schedule(user_id)
+            packets_built: list = []
+            notify_result: dict = {}
+            if schedule.get("auto_build_packets", True) and job_count > 0:
+                from app.application.services.job_packet import JobPacketService
+                from app.application.services.loop_notify import LoopNotifyService
+
+                pkt_svc = JobPacketService(self.db)
+                packets_built = await pkt_svc.build_packets_for_run(user_id, run)
+                notify_result = await LoopNotifyService(self.db).notify_packets_ready(
+                    user_id,
+                    run_id=run.get("id"),
+                    schedule=schedule,
+                    frontend_base=getattr(
+                        self.settings, "LOOP_ENGINEER_FRONTEND_URL", "http://localhost:3000"
+                    ),
+                )
+
+            pending_packets = len(
+                [p for p in packets_built if p.get("status") == "pending_review"]
+            )
+            msg = f"Found {job_count} role(s)."
+            if pending_packets:
+                msg += (
+                    f" Built {pending_packets} research packet(s) — review in /loop "
+                    f"before confirming apply."
+                )
+            else:
+                msg += " Approve shortlist in Pipeline to continue."
+
             return {
                 "ok": True,
                 "run_id": run.get("id"),
                 "stage": run.get("stage"),
                 "job_count": job_count,
+                "packets_built": len(packets_built),
+                "packets_pending_review": pending_packets,
+                "notify": notify_result,
                 "sources_used": run.get("sources_used") or [],
                 "llm_provider": runtime.provider,
                 "llm_model": runtime.model,
-                "message": (
-                    f"Found {job_count} role(s). Approve shortlist in Pipeline "
-                    f"before anything is prepared or applied."
-                ),
+                "message": msg,
             }
         except Exception as exc:
             logger.exception("Loop Engineer scan failed for user %s", user_id)
@@ -311,10 +348,26 @@ class LoopEngineerService:
             ) from exc
 
     def digest_lines(self, user_id: UUID) -> List[Dict[str, Any]]:
-        """Pipeline runs needing attention + schedule status for Inbox digest."""
+        """Pipeline runs + job packets needing attention for Inbox digest."""
         from app.application.services.search_pipeline import SearchPipelineService
+        from app.application.services.job_packet import JobPacketService
 
         lines: List[Dict[str, Any]] = []
+        pkt_svc = JobPacketService(self.db)
+        pending_packets = pkt_svc.list_packets(user_id, status="pending_review", limit=10)
+        if pending_packets:
+            lines.append(
+                {
+                    "text": (
+                        f"{len(pending_packets)} job packet(s) ready — "
+                        f"review company research + tailored resume in Loop Engineer."
+                    ),
+                    "href": "/loop",
+                    "run_id": pending_packets[0].get("run_id"),
+                    "stage": "packets_pending",
+                }
+            )
+
         svc = SearchPipelineService(self.db)
         runs = svc.list_runs(user_id, limit=5)
         pending = [
@@ -373,6 +426,9 @@ class LoopEngineerService:
         watchlist = await self.list_watchlist(user_id)
         schedule = self.get_schedule(user_id)
         digest = self.digest_lines(user_id)
+        from app.application.services.job_packet import JobPacketService
+
+        packets = JobPacketService(self.db).list_packets(user_id, limit=20)
         llm = runtime_status()
         return {
             "watchlist": watchlist,
@@ -380,6 +436,8 @@ class LoopEngineerService:
             "schedule": schedule,
             "due": self._is_due(schedule),
             "digest": digest,
+            "packets": packets,
+            "packets_pending": len([p for p in packets if p.get("status") == "pending_review"]),
             "llm": llm,
             "recommended_models": {
                 "ollama": ["qwen2.5:3b", "deepseek-r1:1.5b"],

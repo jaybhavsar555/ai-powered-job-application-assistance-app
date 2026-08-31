@@ -56,11 +56,15 @@ Vault wiki: entity_type=company_watch        # watchlist companies
 ## Daily loop (with Loop Engineer)
 
 ```
-/loop (schedule) → scan → /pipeline (approve gates) → /tailor → /approvals
-→ /apply (Review & Apply) → /tracker → /outreach
+/loop (schedule + watchlist) → scan → auto packets → email/Inbox notify
+→ /loop review packet → Confirm → /apply (gates) → /tracker
 ```
 
-Resume updates remain in **Tailor / Studio** — Loop Engineer does not silently rewrite your master resume.
+Alternative bulk path: `/pipeline` (shortlist → evaluate → prepare → execute).
+
+Resume updates remain in **Tailor / Studio** — Loop Engineer builds a **preview** in each packet; confirm copies it into the application workflow state.
+
+See also: `docs/loop_engineer_roadmap.md` for v3–v5 plan (push, Slack, portfolio, autofill).
 
 ## Ollama models (12 GB disk)
 

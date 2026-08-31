@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
+  Check,
   Loader2,
   Play,
   Plus,
@@ -11,6 +13,9 @@ import {
   Trash2,
   Radar,
   ShieldCheck,
+  X,
+  FileText,
+  Building2,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import {
@@ -33,6 +38,8 @@ interface LoopSchedule {
   enabled: boolean;
   interval_hours: number;
   watchlist_only: boolean;
+  auto_build_packets?: boolean;
+  notify_email?: boolean;
   last_run_at?: string | null;
   last_run_id?: string | null;
   last_run_jobs?: number;
@@ -46,18 +53,55 @@ interface LoopSchedule {
   philosophy?: string;
 }
 
+interface PacketSummary {
+  id: string;
+  run_id?: string;
+  status?: string;
+  title?: string;
+  company?: string;
+  url?: string;
+  match_score?: number;
+  match_reason?: string;
+  ingested_job_id?: string;
+  apply_session_id?: string;
+}
+
+interface PacketDetail {
+  id: string;
+  status?: string;
+  job?: Record<string, unknown>;
+  jd_summary?: string;
+  company_research?: {
+    summary?: string;
+    tech_stack?: string[];
+    recent_news_hooks?: string[];
+    industry?: string;
+  };
+  tailored_resume?: {
+    summary?: string;
+    tailored_bullets?: string[];
+    added_keywords?: string[];
+  };
+  cover_letter_preview?: string;
+  skill_gap?: { match_score?: number; rationale?: string; missing_skills?: string[] };
+}
+
 interface LoopStatus {
   watchlist: WatchCompany[];
   watchlist_count: number;
   schedule: LoopSchedule;
   due: boolean;
   digest: { text: string; href: string; run_id?: string }[];
+  packets?: PacketSummary[];
+  packets_pending?: number;
   llm?: { provider?: string; model?: string };
   recommended_models?: Record<string, string[]>;
 }
 
 export default function LoopEngineerPage() {
   const token = useAuthStore((s) => s.token);
+  const searchParams = useSearchParams();
+  const packetParam = searchParams.get("packet");
   const [status, setStatus] = useState<LoopStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<PageMessage | null>(null);
@@ -68,6 +112,11 @@ export default function LoopEngineerPage() {
   const [watchlistOnly, setWatchlistOnly] = useState(false);
   const [intervalHours, setIntervalHours] = useState(24);
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [autoBuildPackets, setAutoBuildPackets] = useState(true);
+  const [notifyEmail, setNotifyEmail] = useState(true);
+  const [packets, setPackets] = useState<PacketSummary[]>([]);
+  const [selectedPacket, setSelectedPacket] = useState<PacketDetail | null>(null);
+  const [packetBusy, setPacketBusy] = useState(false);
 
   const authHeaders = useCallback(
     () => ({
@@ -92,6 +141,9 @@ export default function LoopEngineerPage() {
       setWatchlistOnly(sched.watchlist_only ?? false);
       setIntervalHours(sched.interval_hours ?? 24);
       setScheduleEnabled(sched.enabled ?? false);
+      setAutoBuildPackets(sched.auto_build_packets ?? true);
+      setNotifyEmail(sched.notify_email ?? true);
+      setPackets(data.packets || []);
     } catch {
       /* ignore */
     }
@@ -100,6 +152,71 @@ export default function LoopEngineerPage() {
   useEffect(() => {
     void loadStatus();
   }, [loadStatus]);
+
+  const loadPacket = useCallback(
+    async (id: string) => {
+      if (!token) return;
+      setPacketBusy(true);
+      try {
+        const res = await fetch(`/api/v1/loop-engineer/packets/${id}`, {
+          headers: authHeaders(),
+        });
+        if (res.ok) setSelectedPacket(await res.json());
+      } finally {
+        setPacketBusy(false);
+      }
+    },
+    [token, authHeaders]
+  );
+
+  useEffect(() => {
+    if (packetParam) void loadPacket(packetParam);
+  }, [packetParam, loadPacket]);
+
+  const confirmPacket = async (id: string) => {
+    setPacketBusy(true);
+    setBanner(null);
+    try {
+      const res = await fetch(`/api/v1/loop-engineer/packets/${id}/confirm`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ start_apply: true, generate_package: false }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof data.detail === "string" ? data.detail : "Confirm failed"
+        );
+      }
+      setBanner({
+        tone: "success",
+        title: "Confirmed",
+        detail: data.message || "Review & Apply session started.",
+      });
+      await loadStatus();
+      if (data.apply_href) {
+        setSelectedPacket(null);
+      }
+    } catch (err) {
+      setBanner(messageFromError(err, "Confirm failed"));
+    } finally {
+      setPacketBusy(false);
+    }
+  };
+
+  const rejectPacket = async (id: string) => {
+    setPacketBusy(true);
+    try {
+      await fetch(`/api/v1/loop-engineer/packets/${id}/reject`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      setSelectedPacket(null);
+      await loadStatus();
+    } finally {
+      setPacketBusy(false);
+    }
+  };
 
   const saveSchedule = async (patch: Partial<LoopSchedule>) => {
     setBusy(true);
@@ -120,6 +237,8 @@ export default function LoopEngineerPage() {
             experienceLevel: "",
             workAuthorization: "",
           },
+          auto_build_packets: autoBuildPackets,
+          notify_email: notifyEmail,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -373,6 +492,24 @@ export default function LoopEngineerPage() {
             Watchlist companies only (skip general boards)
           </label>
 
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={autoBuildPackets}
+              onChange={(e) => setAutoBuildPackets(e.target.checked)}
+            />
+            Auto-build research + resume packets after each scan
+          </label>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={notifyEmail}
+              onChange={(e) => setNotifyEmail(e.target.checked)}
+            />
+            Email me when packets are ready (SMTP or mock in dev)
+          </label>
+
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-sm space-y-1">
               <span className="text-muted-foreground">Target roles</span>
@@ -413,6 +550,8 @@ export default function LoopEngineerPage() {
                   enabled: scheduleEnabled,
                   interval_hours: intervalHours,
                   watchlist_only: watchlistOnly,
+                  auto_build_packets: autoBuildPackets,
+                  notify_email: notifyEmail,
                 })
               }
               className="rounded-md border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
@@ -446,6 +585,182 @@ export default function LoopEngineerPage() {
           ) : null}
         </section>
       </div>
+
+      <section className="rounded-xl border bg-card p-5 space-y-4">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-medium flex items-center gap-2">
+            <FileText className="h-4 w-4 text-primary" />
+            Job packets — review before apply
+          </h2>
+          {(status?.packets_pending ?? 0) > 0 ? (
+            <span className="text-xs rounded-full bg-primary/10 text-primary px-2 py-1">
+              {status?.packets_pending} pending
+            </span>
+          ) : null}
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Each packet includes JD summary, company research, tailored resume preview, and
+          cover letter draft. Confirm only when you want Review &amp; Apply to start —
+          nothing submits without your gates in /apply.
+        </p>
+
+        {packets.filter((p) => p.status === "pending_review").length === 0 ? (
+          <p className="text-sm text-muted-foreground border border-dashed rounded-lg p-4">
+            No packets yet. Run a scan with auto-build enabled, or build from an existing
+            Pipeline run.
+          </p>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <ul className="divide-y rounded-lg border max-h-80 overflow-y-auto">
+              {packets
+                .filter((p) => p.status === "pending_review")
+                .map((p) => (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      className={`w-full text-left p-3 text-sm hover:bg-muted/50 ${
+                        selectedPacket?.id === p.id ? "bg-primary/5" : ""
+                      }`}
+                      onClick={() => void loadPacket(p.id)}
+                    >
+                      <div className="font-medium">{p.title}</div>
+                      <div className="text-muted-foreground text-xs">
+                        {p.company} · match {p.match_score ?? "?"}%
+                      </div>
+                    </button>
+                  </li>
+                ))}
+            </ul>
+
+            <div className="rounded-lg border p-4 text-sm space-y-3 min-h-[12rem]">
+              {packetBusy && !selectedPacket ? (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading packet…
+                </div>
+              ) : selectedPacket ? (
+                <>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-medium">
+                        {(selectedPacket.job?.title as string) || "Role"}
+                      </div>
+                      <div className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Building2 className="h-3 w-3" />
+                        {(selectedPacket.job?.company as string) ||
+                          (selectedPacket.job?.company_name as string)}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPacket(null)}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  {selectedPacket.job?.url ? (
+                    <a
+                      href={String(selectedPacket.job.url)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-primary block truncate"
+                    >
+                      {String(selectedPacket.job.url)}
+                    </a>
+                  ) : null}
+
+                  <div>
+                    <h4 className="text-xs font-medium uppercase text-muted-foreground">
+                      JD summary
+                    </h4>
+                    <p className="mt-1 whitespace-pre-wrap text-xs">
+                      {selectedPacket.jd_summary}
+                    </p>
+                  </div>
+
+                  {selectedPacket.company_research?.summary ? (
+                    <div>
+                      <h4 className="text-xs font-medium uppercase text-muted-foreground">
+                        Company research
+                      </h4>
+                      <p className="mt-1 text-xs">
+                        {selectedPacket.company_research.summary}
+                      </p>
+                      {(selectedPacket.company_research.recent_news_hooks || []).length >
+                      0 ? (
+                        <ul className="mt-1 list-disc pl-4 text-xs text-muted-foreground">
+                          {selectedPacket.company_research.recent_news_hooks
+                            ?.slice(0, 3)
+                            .map((h, i) => (
+                              <li key={i}>{h}</li>
+                            ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {selectedPacket.tailored_resume?.summary ? (
+                    <div>
+                      <h4 className="text-xs font-medium uppercase text-muted-foreground">
+                        Tailored resume preview
+                      </h4>
+                      <p className="mt-1 text-xs">{selectedPacket.tailored_resume.summary}</p>
+                      <ul className="mt-1 list-disc pl-4 text-xs text-muted-foreground">
+                        {(selectedPacket.tailored_resume.tailored_bullets || [])
+                          .slice(0, 4)
+                          .map((b, i) => (
+                            <li key={i}>{b}</li>
+                          ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {selectedPacket.cover_letter_preview ? (
+                    <div>
+                      <h4 className="text-xs font-medium uppercase text-muted-foreground">
+                        Cover letter draft
+                      </h4>
+                      <p className="mt-1 text-xs whitespace-pre-wrap max-h-32 overflow-y-auto">
+                        {selectedPacket.cover_letter_preview}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    <button
+                      type="button"
+                      disabled={packetBusy}
+                      onClick={() => void confirmPacket(selectedPacket.id)}
+                      className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-xs text-primary-foreground disabled:opacity-50"
+                    >
+                      {packetBusy ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Check className="h-3 w-3" />
+                      )}
+                      Confirm &amp; start apply
+                    </button>
+                    <button
+                      type="button"
+                      disabled={packetBusy}
+                      onClick={() => void rejectPacket(selectedPacket.id)}
+                      className="inline-flex items-center gap-1 rounded-md border px-3 py-2 text-xs hover:bg-muted disabled:opacity-50"
+                    >
+                      <X className="h-3 w-3" />
+                      Skip
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p className="text-muted-foreground text-xs">
+                  Select a packet to review research and resume before confirming.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
 
       <section className="rounded-xl border bg-card p-5 space-y-3">
         <h2 className="font-medium">LLM for scoring (Ollama / Kimi / DeepSeek)</h2>
