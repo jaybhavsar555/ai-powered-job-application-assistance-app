@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowRight,
   Check,
@@ -95,6 +96,8 @@ const STAGE_LABEL: Record<StageId, string> = {
 
 export default function SearchPipelinePage() {
   const token = useAuthStore((s) => s.token);
+  const searchParams = useSearchParams();
+  const runIdParam = searchParams.get("run_id");
   const [run, setRun] = useState<PipelineRun | null>(null);
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<PageMessage | null>(null);
@@ -147,6 +150,15 @@ export default function SearchPipelinePage() {
   const loadLatest = useCallback(async () => {
     if (!token) return;
     try {
+      if (runIdParam) {
+        const detail = await fetch(`/api/v1/search-pipeline/runs/${runIdParam}`, {
+          headers: authHeaders(),
+        });
+        if (detail.ok) {
+          syncFromRun(await detail.json());
+          return;
+        }
+      }
       const res = await fetch("/api/v1/search-pipeline/runs", {
         headers: authHeaders(),
       });
@@ -161,7 +173,7 @@ export default function SearchPipelinePage() {
     } catch {
       /* ignore */
     }
-  }, [token, authHeaders, syncFromRun]);
+  }, [token, authHeaders, syncFromRun, runIdParam]);
 
   useEffect(() => {
     void loadLatest();

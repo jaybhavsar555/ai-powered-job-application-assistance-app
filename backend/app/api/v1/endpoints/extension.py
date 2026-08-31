@@ -199,7 +199,41 @@ async def extension_autofill_profile(
             "skip_queue_count": len(prefs.get("skip_queue") or []),
         },
         "supported_hosts": prefs.get("allowlist") or ["*"],
+        "loop_engineer_queue": _extension_apply_queue_summary(current_user.id),
     }
+
+
+def _extension_apply_queue_summary(user_id) -> dict:
+    from app.application.services.extension_apply_queue import list_queue
+
+    pending = list_queue(user_id)
+    return {
+        "pending_count": len(pending),
+        "items": pending[:8],
+    }
+
+
+@router.get("/apply-queue")
+async def extension_apply_queue(
+    current_user: User = Depends(get_current_user),
+):
+    """
+  Jobs confirmed via Loop Engineer — open URL in browser, extension autofill + attach resume.
+  """
+    from app.application.services.extension_apply_queue import list_queue
+
+    return {"queue": list_queue(current_user.id)}
+
+
+@router.post("/apply-queue/{application_id}/done")
+async def extension_apply_queue_done(
+    application_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    from app.application.services.extension_apply_queue import mark_done
+
+    ok = mark_done(current_user.id, application_id)
+    return {"marked_done": ok}
 
 
 @router.get("/resume-file")

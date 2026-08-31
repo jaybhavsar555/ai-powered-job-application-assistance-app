@@ -1,0 +1,1219 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import {
+  Check,
+  Loader2,
+  Play,
+  Plus,
+  RefreshCw,
+  Repeat,
+  Trash2,
+  Radar,
+  ShieldCheck,
+  X,
+  FileText,
+  Building2,
+} from "lucide-react";
+import { useAuthStore } from "@/store/auth";
+import {
+  PageMessageBanner,
+  PageMessage,
+  messageFromError,
+} from "@/components/ui/PageMessageBanner";
+import { LlmProviderSwitch } from "@/components/workflow/LlmProviderSwitch";
+
+interface WatchCompany {
+  id: string;
+  name: string;
+  careers_url?: string;
+  ats_host?: string;
+  priority?: string;
+  notes?: string;
+}
+
+interface LoopSchedule {
+  enabled: boolean;
+  interval_hours: number;
+  watchlist_only: boolean;
+  auto_build_packets?: boolean;
+  notify_email?: boolean;
+  notify_telegram?: boolean;
+  notify_whatsapp?: boolean;
+  notify_push?: boolean;
+  sync_portfolio_on_confirm?: boolean;
+  auto_package_on_confirm?: boolean;
+  telegram_chat_id?: string;
+  whatsapp_phone?: string;
+  last_run_at?: string | null;
+  last_run_id?: string | null;
+  last_run_jobs?: number;
+  last_error?: string | null;
+  preferences?: {
+    targetRoles?: string;
+    isRemote?: boolean;
+    locationHubs?: string[];
+    workAuthorization?: string;
+  };
+  philosophy?: string;
+}
+
+interface PacketSummary {
+  id: string;
+  run_id?: string;
+  status?: string;
+  title?: string;
+  company?: string;
+  url?: string;
+  match_score?: number;
+  match_reason?: string;
+  ingested_job_id?: string;
+  apply_session_id?: string;
+}
+
+interface PacketDetail {
+  id: string;
+  status?: string;
+  job?: Record<string, unknown>;
+  jd_summary?: string;
+  company_research?: {
+    summary?: string;
+    tech_stack?: string[];
+    recent_news_hooks?: string[];
+    industry?: string;
+  };
+  tailored_resume?: {
+    summary?: string;
+    tailored_bullets?: string[];
+    added_keywords?: string[];
+  };
+  cover_letter_preview?: string;
+  skill_gap?: { match_score?: number; rationale?: string; missing_skills?: string[] };
+}
+
+interface LoopStatus {
+  watchlist: WatchCompany[];
+  watchlist_count: number;
+  schedule: LoopSchedule;
+  due: boolean;
+  digest: { text: string; href: string; run_id?: string }[];
+  packets?: PacketSummary[];
+  packets_pending?: number;
+  notify_channels?: {
+    email?: { configured?: boolean; enabled?: boolean };
+    telegram?: { configured?: boolean; enabled?: boolean; chat_id_set?: boolean };
+    whatsapp?: { configured?: boolean; enabled?: boolean; phone_set?: boolean; provider?: string };
+    push?: { configured?: boolean; enabled?: boolean };
+  };
+  llm?: { provider?: string; model?: string };
+  recommended_models?: Record<string, string[]>;
+}
+
+export default function LoopEngineerPage() {
+  const token = useAuthStore((s) => s.token);
+  const searchParams = useSearchParams();
+  const packetParam = searchParams.get("packet");
+  const [status, setStatus] = useState<LoopStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [banner, setBanner] = useState<PageMessage | null>(null);
+  const [newName, setNewName] = useState("");
+  const [newUrl, setNewUrl] = useState("");
+  const [targetRoles, setTargetRoles] = useState("software engineer");
+  const [isRemote, setIsRemote] = useState(true);
+  const [watchlistOnly, setWatchlistOnly] = useState(false);
+  const [intervalHours, setIntervalHours] = useState(24);
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [autoBuildPackets, setAutoBuildPackets] = useState(true);
+  const [notifyEmail, setNotifyEmail] = useState(true);
+  const [notifyTelegram, setNotifyTelegram] = useState(false);
+  const [notifyWhatsapp, setNotifyWhatsapp] = useState(false);
+  const [notifyPush, setNotifyPush] = useState(true);
+  const [autoPackageOnConfirm, setAutoPackageOnConfirm] = useState(true);
+  const [syncPortfolioOnConfirm, setSyncPortfolioOnConfirm] = useState(true);
+  const [telegramChatId, setTelegramChatId] = useState("");
+  const [whatsappPhone, setWhatsappPhone] = useState("");
+  const [linkCodeInfo, setLinkCodeInfo] = useState<{
+    code?: string;
+    instructions?: string;
+    bot_url?: string;
+  } | null>(null);
+  const [packets, setPackets] = useState<PacketSummary[]>([]);
+  const [selectedPacket, setSelectedPacket] = useState<PacketDetail | null>(null);
+  const [packetBusy, setPacketBusy] = useState(false);
+
+  const authHeaders = useCallback(
+    () => ({
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    }),
+    [token]
+  );
+
+  const loadStatus = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch("/api/v1/loop-engineer/status", {
+        headers: authHeaders(),
+      });
+      if (!res.ok) return;
+      const data: LoopStatus = await res.json();
+      setStatus(data);
+      const sched = data.schedule || {};
+      setTargetRoles(sched.preferences?.targetRoles || "software engineer");
+      setIsRemote(sched.preferences?.isRemote ?? true);
+      setWatchlistOnly(sched.watchlist_only ?? false);
+      setIntervalHours(sched.interval_hours ?? 24);
+      setScheduleEnabled(sched.enabled ?? false);
+      setAutoBuildPackets(sched.auto_build_packets ?? true);
+      setNotifyEmail(sched.notify_email ?? true);
+      setNotifyTelegram(sched.notify_telegram ?? false);
+      setNotifyWhatsapp(sched.notify_whatsapp ?? false);
+      setNotifyPush(sched.notify_push ?? true);
+      setAutoPackageOnConfirm(sched.auto_package_on_confirm ?? true);
+      setSyncPortfolioOnConfirm(sched.sync_portfolio_on_confirm ?? true);
+      setTelegramChatId(sched.telegram_chat_id || "");
+      setWhatsappPhone(sched.whatsapp_phone || "");
+      setPackets(data.packets || []);
+    } catch {
+      /* ignore */
+    }
+  }, [token, authHeaders]);
+
+  useEffect(() => {
+    void loadStatus();
+  }, [loadStatus]);
+
+  const loadPacket = useCallback(
+    async (id: string) => {
+      if (!token) return;
+      setPacketBusy(true);
+      try {
+        const res = await fetch(`/api/v1/loop-engineer/packets/${id}`, {
+          headers: authHeaders(),
+        });
+        if (res.ok) setSelectedPacket(await res.json());
+      } finally {
+        setPacketBusy(false);
+      }
+    },
+    [token, authHeaders]
+  );
+
+  useEffect(() => {
+    if (packetParam) void loadPacket(packetParam);
+  }, [packetParam, loadPacket]);
+
+  const confirmPacket = async (id: string) => {
+    setPacketBusy(true);
+    setBanner(null);
+    try {
+      const res = await fetch(`/api/v1/loop-engineer/packets/${id}/confirm`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ start_apply: true, generate_package: false }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof data.detail === "string" ? data.detail : "Confirm failed"
+        );
+      }
+      setBanner({
+        tone: "success",
+        title: "Confirmed",
+        detail: data.message || "Review & Apply session started.",
+      });
+      await loadStatus();
+      if (data.apply_href) {
+        setSelectedPacket(null);
+      }
+    } catch (err) {
+      setBanner(messageFromError(err, "Confirm failed"));
+    } finally {
+      setPacketBusy(false);
+    }
+  };
+
+  const rejectPacket = async (id: string) => {
+    setPacketBusy(true);
+    try {
+      await fetch(`/api/v1/loop-engineer/packets/${id}/reject`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      setSelectedPacket(null);
+      await loadStatus();
+    } finally {
+      setPacketBusy(false);
+    }
+  };
+
+  const saveSchedule = async (patch: Partial<LoopSchedule>) => {
+    setBusy(true);
+    setBanner(null);
+    try {
+      const res = await fetch("/api/v1/loop-engineer/schedule", {
+        method: "PUT",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          ...patch,
+          preferences: {
+            targetRoles,
+            isRemote,
+            locationHubs: isRemote ? ["Remote"] : [],
+            minSalary: "0",
+            companyTypes: [],
+            techStack: "",
+            experienceLevel: "",
+            workAuthorization: "",
+          },
+          auto_build_packets: autoBuildPackets,
+          notify_email: notifyEmail,
+          notify_telegram: notifyTelegram,
+          notify_whatsapp: notifyWhatsapp,
+          notify_push: notifyPush,
+          telegram_chat_id: telegramChatId,
+          whatsapp_phone: whatsappPhone,
+          auto_package_on_confirm: autoPackageOnConfirm,
+          sync_portfolio_on_confirm: syncPortfolioOnConfirm,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof data.detail === "string" ? data.detail : "Could not save schedule"
+        );
+      }
+      await loadStatus();
+      setBanner({
+        tone: "success",
+        title: "Schedule saved",
+        detail: patch.enabled
+          ? `Loop Engineer will scan every ${intervalHours}h (Ollama/Kimi/DeepSeek).`
+          : "Schedule updated.",
+      });
+    } catch (err) {
+      setBanner(messageFromError(err, "Schedule save failed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addCompany = async () => {
+    if (!newName.trim()) return;
+    setBusy(true);
+    setBanner(null);
+    try {
+      const res = await fetch("/api/v1/loop-engineer/watchlist", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          name: newName.trim(),
+          careers_url: newUrl.trim(),
+          priority: "normal",
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof data.detail === "string" ? data.detail : "Could not add company"
+        );
+      }
+      setNewName("");
+      setNewUrl("");
+      await loadStatus();
+      setBanner({
+        tone: "success",
+        title: "Company added",
+        detail: `${data.company?.name || newName} is on your watchlist.`,
+      });
+    } catch (err) {
+      setBanner(messageFromError(err, "Add company failed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeCompany = async (id: string) => {
+    setBusy(true);
+    try {
+      await fetch(`/api/v1/loop-engineer/watchlist/${id}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      await loadStatus();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const seedExamples = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/v1/loop-engineer/watchlist/seed-examples", {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      const data = await res.json();
+      await loadStatus();
+      setBanner({
+        tone: "success",
+        title: "Examples seeded",
+        detail: `Added ${data.seeded || 0} ATS-friendly companies (Stripe, Figma, Notion).`,
+      });
+    } catch (err) {
+      setBanner(messageFromError(err, "Seed failed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runNow = async () => {
+    setBusy(true);
+    setBanner(null);
+    try {
+      await saveSchedule({
+        enabled: scheduleEnabled,
+        interval_hours: intervalHours,
+        watchlist_only: watchlistOnly,
+      });
+      const res = await fetch("/api/v1/loop-engineer/run-now", {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof data.detail === "string" ? data.detail : "Scan failed"
+        );
+      }
+      await loadStatus();
+      setBanner({
+        tone: "success",
+        title: "Loop scan complete",
+        detail: (
+          data.message as string
+        ) || `Found ${data.job_count ?? 0} jobs — approve shortlist in Pipeline.`,
+      });
+    } catch (err) {
+      setBanner(messageFromError(err, "Run now failed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const generateTelegramLink = async () => {
+    setBusy(true);
+    setLinkCodeInfo(null);
+    try {
+      const res = await fetch("/api/v1/loop-engineer/notify/telegram/link-code", {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof data.detail === "string" ? data.detail : "Could not generate link code"
+        );
+      }
+      setLinkCodeInfo(data);
+      setBanner({
+        tone: "success",
+        title: "Telegram link code",
+        detail: `Send /link ${data.code} to @${data.bot_username || "your bot"}`,
+      });
+    } catch (err) {
+      setBanner(messageFromError(err, "Telegram link failed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const subscribeBrowserPush = async () => {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setBanner({
+        tone: "warning",
+        title: "Push not supported",
+        detail: "Use Chrome/Edge on desktop or Android.",
+      });
+      return;
+    }
+    setBusy(true);
+    try {
+      const keyRes = await fetch("/api/v1/loop-engineer/notify/push/vapid-public-key", {
+        headers: authHeaders(),
+      });
+      const keyData = await keyRes.json().catch(() => ({}));
+      if (!keyRes.ok) {
+        throw new Error(
+          typeof keyData.detail === "string" ? keyData.detail : "VAPID keys not configured"
+        );
+      }
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(keyData.publicKey as string),
+      });
+      const res = await fetch("/api/v1/loop-engineer/notify/push/subscribe", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ subscription: sub.toJSON() }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(
+          typeof data.detail === "string" ? data.detail : "Subscribe failed"
+        );
+      }
+      setNotifyPush(true);
+      setBanner({
+        tone: "success",
+        title: "Browser push enabled",
+        detail: "You will get desktop notifications when packets are ready.",
+      });
+    } catch (err) {
+      setBanner(messageFromError(err, "Browser push failed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  function urlBase64ToUint8Array(base64String: string) {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const raw = window.atob(base64);
+    const arr = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+    return arr;
+  }
+
+  const batchConfirmAll = async () => {
+    const ids = packets.filter((p) => p.status === "pending_review").map((p) => p.id);
+    if (!ids.length) return;
+    setPacketBusy(true);
+    try {
+      const res = await fetch("/api/v1/loop-engineer/packets/batch-confirm", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ packet_ids: ids, start_apply: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof data.detail === "string" ? data.detail : "Batch confirm failed"
+        );
+      }
+      setBanner({
+        tone: "success",
+        title: "Batch confirmed",
+        detail: `Confirmed ${data.confirmed ?? 0} packet(s) — packages + apply sessions started.`,
+      });
+      setSelectedPacket(null);
+      await loadStatus();
+    } catch (err) {
+      setBanner(messageFromError(err, "Batch confirm failed"));
+    } finally {
+      setPacketBusy(false);
+    }
+  };
+
+  const batchRejectAll = async () => {
+    const ids = packets.filter((p) => p.status === "pending_review").map((p) => p.id);
+    if (!ids.length) return;
+    setPacketBusy(true);
+    try {
+      await fetch("/api/v1/loop-engineer/packets/batch-reject", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ packet_ids: ids }),
+      });
+      setSelectedPacket(null);
+      await loadStatus();
+    } finally {
+      setPacketBusy(false);
+    }
+  };
+
+  const testNotify = async (channel: string) => {
+    setBusy(true);
+    try {
+      await saveSchedule({
+        enabled: scheduleEnabled,
+        interval_hours: intervalHours,
+        watchlist_only: watchlistOnly,
+        auto_build_packets: autoBuildPackets,
+        notify_email: notifyEmail,
+        notify_telegram: notifyTelegram,
+        notify_whatsapp: notifyWhatsapp,
+        notify_push: notifyPush,
+        telegram_chat_id: telegramChatId,
+        whatsapp_phone: whatsappPhone,
+        auto_package_on_confirm: autoPackageOnConfirm,
+        sync_portfolio_on_confirm: syncPortfolioOnConfirm,
+      });
+      const res = await fetch("/api/v1/loop-engineer/notify/test", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ channel }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof data.detail === "string" ? data.detail : "Test failed"
+        );
+      }
+      setBanner({
+        tone: "success",
+        title: `${channel} test sent`,
+        detail: "Check your phone or app for the test message.",
+      });
+    } catch (err) {
+      setBanner(messageFromError(err, "Notification test failed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const watchlist = status?.watchlist || [];
+
+  return (
+    <div className="max-w-5xl mx-auto p-4 md:p-8 space-y-8">
+      <header className="space-y-2">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-primary/10 text-primary">
+            <Repeat className="h-6 w-6" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Loop Engineer</h1>
+            <p className="text-sm text-muted-foreground max-w-2xl">
+              Watch companies, deep-search openings on a schedule with Ollama / Kimi /
+              DeepSeek, then approve every step in Pipeline — no silent apply.
+            </p>
+          </div>
+        </div>
+      </header>
+
+      <PageMessageBanner message={banner} onDismiss={() => setBanner(null)} />
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <section className="rounded-xl border bg-card p-5 space-y-4">
+          <h2 className="font-medium flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-primary" />
+            Company watchlist
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Add employers you care about. Loop Engineer runs DuckDuckGo site searches on
+            their careers pages before broader boards.
+          </p>
+
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              className="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+              placeholder="Company name"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+            />
+            <input
+              className="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+              placeholder="Careers URL (Greenhouse, Lever, Ashby…)"
+              value={newUrl}
+              onChange={(e) => setNewUrl(e.target.value)}
+            />
+            <button
+              type="button"
+              disabled={busy || !newName.trim()}
+              onClick={() => void addCompany()}
+              className="inline-flex items-center justify-center gap-1 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" />
+              Add
+            </button>
+          </div>
+
+          {watchlist.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground space-y-2">
+              <p>No companies yet.</p>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void seedExamples()}
+                className="text-primary hover:underline"
+              >
+                Seed Stripe, Figma, Notion examples
+              </button>
+            </div>
+          ) : (
+            <ul className="divide-y rounded-lg border">
+              {watchlist.map((co) => (
+                <li
+                  key={co.id}
+                  className="flex items-start justify-between gap-2 p-3 text-sm"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium">{co.name}</div>
+                    {co.careers_url ? (
+                      <a
+                        href={co.careers_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-primary truncate block"
+                      >
+                        {co.careers_url}
+                      </a>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void removeCompany(co.id)}
+                    className="text-muted-foreground hover:text-destructive p-1"
+                    aria-label={`Remove ${co.name}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="rounded-xl border bg-card p-5 space-y-4">
+          <h2 className="font-medium flex items-center gap-2">
+            <RefreshCw className="h-4 w-4 text-primary" />
+            Schedule & scan prefs
+          </h2>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={scheduleEnabled}
+              onChange={(e) => setScheduleEnabled(e.target.checked)}
+            />
+            Enable scheduled scans
+          </label>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={watchlistOnly}
+              onChange={(e) => setWatchlistOnly(e.target.checked)}
+            />
+            Watchlist companies only (skip general boards)
+          </label>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={autoBuildPackets}
+              onChange={(e) => setAutoBuildPackets(e.target.checked)}
+            />
+            Auto-build research + resume packets after each scan
+          </label>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={notifyEmail}
+              onChange={(e) => setNotifyEmail(e.target.checked)}
+            />
+            Email me when packets are ready (SMTP or mock in dev)
+          </label>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={notifyTelegram}
+              onChange={(e) => setNotifyTelegram(e.target.checked)}
+              disabled={!status?.notify_channels?.telegram?.configured}
+            />
+            Telegram alerts
+            {!status?.notify_channels?.telegram?.configured ? (
+              <span className="text-xs text-muted-foreground">(set TELEGRAM_BOT_TOKEN)</span>
+            ) : null}
+          </label>
+
+          {notifyTelegram ? (
+            <div className="rounded-lg border bg-muted/20 p-3 space-y-2 text-sm">
+              <p className="text-xs text-muted-foreground">
+                Link via bot (recommended) or paste chat ID from @userinfobot
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void generateTelegramLink()}
+                  className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                >
+                  Generate link code
+                </button>
+                {linkCodeInfo?.bot_url ? (
+                  <a
+                    href={linkCodeInfo.bot_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-primary underline"
+                  >
+                    Open bot
+                  </a>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={busy || !telegramChatId}
+                  onClick={() => void testNotify("telegram")}
+                  className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                >
+                  Test Telegram
+                </button>
+              </div>
+              {linkCodeInfo?.code ? (
+                <p className="text-xs font-mono bg-background border rounded px-2 py-1">
+                  /link {linkCodeInfo.code}
+                </p>
+              ) : null}
+              <input
+                className="w-full rounded-md border bg-background px-3 py-2 text-xs"
+                placeholder="Telegram chat ID (optional if linked via bot)"
+                value={telegramChatId}
+                onChange={(e) => setTelegramChatId(e.target.value)}
+              />
+            </div>
+          ) : null}
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={notifyWhatsapp}
+              onChange={(e) => setNotifyWhatsapp(e.target.checked)}
+              disabled={!status?.notify_channels?.whatsapp?.configured}
+            />
+            WhatsApp alerts
+            {!status?.notify_channels?.whatsapp?.configured ? (
+              <span className="text-xs text-muted-foreground">
+                (set WHATSAPP_PROVIDER=meta or twilio)
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                ({status?.notify_channels?.whatsapp?.provider})
+              </span>
+            )}
+          </label>
+
+          {notifyWhatsapp ? (
+            <div className="rounded-lg border bg-muted/20 p-3 space-y-2 text-sm">
+              <p className="text-xs text-muted-foreground">
+                E.164 format e.g. +14155552671. Meta: message your business number first
+                to open the 24h window.
+              </p>
+              <input
+                className="w-full rounded-md border bg-background px-3 py-2 text-xs"
+                placeholder="+1234567890"
+                value={whatsappPhone}
+                onChange={(e) => setWhatsappPhone(e.target.value)}
+              />
+              <button
+                type="button"
+                disabled={busy || !whatsappPhone}
+                onClick={() => void testNotify("whatsapp")}
+                className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+              >
+                Test WhatsApp
+              </button>
+            </div>
+          ) : null}
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={notifyPush}
+              onChange={(e) => setNotifyPush(e.target.checked)}
+              disabled={!status?.notify_channels?.push?.configured}
+            />
+            Browser push (desktop)
+            {!status?.notify_channels?.push?.configured ? (
+              <span className="text-xs text-muted-foreground">(VAPID keys)</span>
+            ) : null}
+          </label>
+          {notifyPush ? (
+            <div className="flex flex-wrap gap-2 text-sm">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void subscribeBrowserPush()}
+                className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+              >
+                Enable browser notifications
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void testNotify("push")}
+                className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+              >
+                Test push
+              </button>
+            </div>
+          ) : null}
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={autoPackageOnConfirm}
+              onChange={(e) => setAutoPackageOnConfirm(e.target.checked)}
+            />
+            Auto-generate DOCX/PDF package on confirm (v3)
+          </label>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={syncPortfolioOnConfirm}
+              onChange={(e) => setSyncPortfolioOnConfirm(e.target.checked)}
+            />
+            Update static portfolio export on confirm (v4)
+          </label>
+
+          {syncPortfolioOnConfirm ? (
+            <a
+              href="/api/v1/loop-engineer/portfolio/preview"
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-primary underline"
+            >
+              Preview portfolio export
+            </a>
+          ) : null}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-sm space-y-1">
+              <span className="text-muted-foreground">Target roles</span>
+              <input
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                value={targetRoles}
+                onChange={(e) => setTargetRoles(e.target.value)}
+              />
+            </label>
+            <label className="text-sm space-y-1">
+              <span className="text-muted-foreground">Interval (hours)</span>
+              <input
+                type="number"
+                min={1}
+                max={168}
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                value={intervalHours}
+                onChange={(e) => setIntervalHours(Number(e.target.value) || 24)}
+              />
+            </label>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={isRemote}
+              onChange={(e) => setIsRemote(e.target.checked)}
+            />
+            Prefer remote roles
+          </label>
+
+          <div className="flex flex-wrap gap-2 pt-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                void saveSchedule({
+                  enabled: scheduleEnabled,
+                  interval_hours: intervalHours,
+                  watchlist_only: watchlistOnly,
+                  auto_build_packets: autoBuildPackets,
+                  notify_email: notifyEmail,
+                  notify_telegram: notifyTelegram,
+                  notify_whatsapp: notifyWhatsapp,
+                  telegram_chat_id: telegramChatId,
+                  whatsapp_phone: whatsappPhone,
+                })
+              }
+              className="rounded-md border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
+            >
+              Save schedule
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void runNow()}
+              className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
+            >
+              {busy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4" />
+              )}
+              Run scan now
+            </button>
+          </div>
+
+          {status?.schedule?.last_run_at ? (
+            <p className="text-xs text-muted-foreground">
+              Last run: {status.schedule.last_run_jobs ?? 0} job(s) at{" "}
+              {String(status.schedule.last_run_at).slice(0, 16).replace("T", " ")} UTC
+              {status.due ? " · next scan due" : ""}
+            </p>
+          ) : null}
+          {status?.schedule?.last_error ? (
+            <p className="text-xs text-destructive">{status.schedule.last_error}</p>
+          ) : null}
+        </section>
+      </div>
+
+      <section className="rounded-xl border bg-card p-5 space-y-4">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-medium flex items-center gap-2">
+            <FileText className="h-4 w-4 text-primary" />
+            Job packets — review before apply
+          </h2>
+          {(status?.packets_pending ?? 0) > 0 ? (
+            <span className="text-xs rounded-full bg-primary/10 text-primary px-2 py-1">
+              {status?.packets_pending} pending
+            </span>
+          ) : null}
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Each packet includes JD summary, company research, tailored resume preview, and
+          cover letter draft. Confirm generates DOCX/PDF + extension apply queue (v5).
+        </p>
+
+        {packets.filter((p) => p.status === "pending_review").length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={packetBusy}
+              onClick={() => void batchConfirmAll()}
+              className="rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground disabled:opacity-50"
+            >
+              Confirm all pending
+            </button>
+            <button
+              type="button"
+              disabled={packetBusy}
+              onClick={() => void batchRejectAll()}
+              className="rounded-md border px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-50"
+            >
+              Skip all pending
+            </button>
+          </div>
+        ) : null}
+
+        {packets.filter((p) => p.status === "pending_review").length === 0 ? (
+          <p className="text-sm text-muted-foreground border border-dashed rounded-lg p-4">
+            No packets yet. Run a scan with auto-build enabled, or build from an existing
+            Pipeline run.
+          </p>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <ul className="divide-y rounded-lg border max-h-80 overflow-y-auto">
+              {packets
+                .filter((p) => p.status === "pending_review")
+                .map((p) => (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      className={`w-full text-left p-3 text-sm hover:bg-muted/50 ${
+                        selectedPacket?.id === p.id ? "bg-primary/5" : ""
+                      }`}
+                      onClick={() => void loadPacket(p.id)}
+                    >
+                      <div className="font-medium">{p.title}</div>
+                      <div className="text-muted-foreground text-xs">
+                        {p.company} · match {p.match_score ?? "?"}%
+                      </div>
+                    </button>
+                  </li>
+                ))}
+            </ul>
+
+            <div className="rounded-lg border p-4 text-sm space-y-3 min-h-[12rem]">
+              {packetBusy && !selectedPacket ? (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading packet…
+                </div>
+              ) : selectedPacket ? (
+                <>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-medium">
+                        {(selectedPacket.job?.title as string) || "Role"}
+                      </div>
+                      <div className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Building2 className="h-3 w-3" />
+                        {(selectedPacket.job?.company as string) ||
+                          (selectedPacket.job?.company_name as string)}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPacket(null)}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  {selectedPacket.job?.url ? (
+                    <a
+                      href={String(selectedPacket.job.url)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-primary block truncate"
+                    >
+                      {String(selectedPacket.job.url)}
+                    </a>
+                  ) : null}
+
+                  <div>
+                    <h4 className="text-xs font-medium uppercase text-muted-foreground">
+                      JD summary
+                    </h4>
+                    <p className="mt-1 whitespace-pre-wrap text-xs">
+                      {selectedPacket.jd_summary}
+                    </p>
+                  </div>
+
+                  {selectedPacket.company_research?.summary ? (
+                    <div>
+                      <h4 className="text-xs font-medium uppercase text-muted-foreground">
+                        Company research
+                      </h4>
+                      <p className="mt-1 text-xs">
+                        {selectedPacket.company_research.summary}
+                      </p>
+                      {(selectedPacket.company_research.recent_news_hooks || []).length >
+                      0 ? (
+                        <ul className="mt-1 list-disc pl-4 text-xs text-muted-foreground">
+                          {selectedPacket.company_research.recent_news_hooks
+                            ?.slice(0, 3)
+                            .map((h, i) => (
+                              <li key={i}>{h}</li>
+                            ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {selectedPacket.tailored_resume?.summary ? (
+                    <div>
+                      <h4 className="text-xs font-medium uppercase text-muted-foreground">
+                        Tailored resume preview
+                      </h4>
+                      <p className="mt-1 text-xs">{selectedPacket.tailored_resume.summary}</p>
+                      <ul className="mt-1 list-disc pl-4 text-xs text-muted-foreground">
+                        {(selectedPacket.tailored_resume.tailored_bullets || [])
+                          .slice(0, 4)
+                          .map((b, i) => (
+                            <li key={i}>{b}</li>
+                          ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {selectedPacket.cover_letter_preview ? (
+                    <div>
+                      <h4 className="text-xs font-medium uppercase text-muted-foreground">
+                        Cover letter draft
+                      </h4>
+                      <p className="mt-1 text-xs whitespace-pre-wrap max-h-32 overflow-y-auto">
+                        {selectedPacket.cover_letter_preview}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    <button
+                      type="button"
+                      disabled={packetBusy}
+                      onClick={() => void confirmPacket(selectedPacket.id)}
+                      className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-xs text-primary-foreground disabled:opacity-50"
+                    >
+                      {packetBusy ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Check className="h-3 w-3" />
+                      )}
+                      Confirm &amp; start apply
+                    </button>
+                    <button
+                      type="button"
+                      disabled={packetBusy}
+                      onClick={() => void rejectPacket(selectedPacket.id)}
+                      className="inline-flex items-center gap-1 rounded-md border px-3 py-2 text-xs hover:bg-muted disabled:opacity-50"
+                    >
+                      <X className="h-3 w-3" />
+                      Skip
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p className="text-muted-foreground text-xs">
+                  Select a packet to review research and resume before confirming.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-xl border bg-card p-5 space-y-3">
+        <h2 className="font-medium">LLM for scoring (Ollama / Kimi / DeepSeek)</h2>
+        <p className="text-sm text-muted-foreground">
+          Discovery and Pipeline use this provider to score watchlist matches. Local
+          Ollama: <code className="text-xs">qwen2.5:3b</code> or{" "}
+          <code className="text-xs">deepseek-r1:1.5b</code>. Free cloud: Kimi K3 or
+          DeepSeek via Token Harbor.
+        </p>
+        <LlmProviderSwitch />
+        {status?.llm?.provider ? (
+          <p className="text-xs text-muted-foreground">
+            Active: {status.llm.provider} / {status.llm.model}
+          </p>
+        ) : null}
+      </section>
+
+      <section className="rounded-xl border bg-card p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="font-medium flex items-center gap-2">
+            <Radar className="h-4 w-4 text-primary" />
+            After scan — approve in Pipeline
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Shortlist → evaluate → prepare → apply/email gates. Resume tailoring stays in
+            Tailor / Studio (not auto-rewritten without you).
+          </p>
+        </div>
+        <Link
+          href={
+            status?.schedule?.last_run_id
+              ? `/pipeline?run_id=${status.schedule.last_run_id}`
+              : "/pipeline"
+          }
+          className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground shrink-0"
+        >
+          Open Pipeline
+        </Link>
+      </section>
+
+      {(status?.digest || []).length > 0 ? (
+        <section className="rounded-xl border bg-muted/30 p-4 text-sm space-y-2">
+          <h3 className="font-medium">Inbox digest preview</h3>
+          <ul className="list-disc pl-5 text-muted-foreground space-y-1">
+            {status!.digest.map((d, i) => (
+              <li key={i}>
+                <Link href={d.href} className="text-primary hover:underline">
+                  {d.text}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </div>
+  );
+}

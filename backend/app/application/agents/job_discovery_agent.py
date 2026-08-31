@@ -44,7 +44,7 @@ class DiscoveredJob(BaseModel):
     url: Optional[str] = Field(default=None, description="Canonical job posting URL")
     source: Optional[str] = Field(
         default=None,
-        description="vault_portals|remotive|remoteok|arbeitnow|web_search",
+        description="vault_portals|company_watchlist|remotive|remoteok|arbeitnow|web_search",
     )
     posted_at: Optional[str] = Field(default=None, description="ISO date if known")
 
@@ -587,6 +587,154 @@ class JobDiscoveryAgent:
         )
         return combined[:limit]
 
+    async def load_company_watchlist(self, user_id: str) -> List[Dict[str, str]]:
+        """Load company_watch entities from Vault (Loop Engineer watchlist)."""
+        out: List[Dict[str, str]] = []
+        if self.knowledge is None or not user_id:
+            return out
+        try:
+            entities = await self.knowledge.get_by_user_id(UUID(user_id))
+            for e in entities:
+                if getattr(e, "entity_type", None) != "company_watch":
+                    continue
+                content = e.content or {}
+                name = (e.title or content.get("name") or "").strip()
+                url = (content.get("careers_url") or content.get("url") or "").strip()
+                if not name:
+                    continue
+                out.append(
+                    {
+                        "name": name,
+                        "careers_url": url,
+                        "ats_host": str(content.get("ats_host") or "").strip(),
+                        "priority": str(content.get("priority") or "normal"),
+                    }
+                )
+        except Exception as exc:
+            logger.warning("Could not load company watchlist: %s", exc)
+        return out
+
+    async def fetch_watchlist_companies(
+        self,
+        search_term: str,
+        location: str,
+        limit: int,
+        companies: List[Dict[str, str]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Deep-search watched companies via DuckDuckGo site: queries on careers URLs
+        and company names (Loop Engineer).
+        """
+        import urllib.parse
+        from bs4 import BeautifulSoup
+
+        if not companies:
+            return []
+        loc = (location or "Remote").strip()
+        term = (search_term or "software engineer").strip()
+        block_hosts = {
+            "duckduckgo.com",
+            "google.com",
+            "bing.com",
+            "youtube.com",
+            "facebook.com",
+            "twitter.com",
+            "x.com",
+            "reddit.com",
+        }
+        out: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        per_company = max(2, limit // max(1, len(companies)))
+
+        async with httpx.AsyncClient(
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/122.0.0.0 Safari/537.36"
+                ),
+                "Accept": "text/html,application/xhtml+xml",
+            },
+            follow_redirects=True,
+            timeout=15.0,
+        ) as client:
+            for co in companies:
+                if len(out) >= limit:
+                    break
+                name = co.get("name") or "Company"
+                careers = (co.get("careers_url") or "").strip()
+                host = _portal_host(careers) if careers else ""
+                if host:
+                    query = f'site:{host} {term} (job OR careers OR apply)'
+                else:
+                    query = f'"{name}" {term} (careers OR jobs OR greenhouse OR lever OR ashby)'
+                if loc and loc.lower() not in ("remote", "any"):
+                    query += f' "{loc}"'
+                encoded = urllib.parse.quote(query)
+                url = f"https://html.duckduckgo.com/html/?q={encoded}&df=m"
+                try:
+                    response = await client.get(url)
+                except Exception:
+                    continue
+                if response.status_code != 200:
+                    continue
+                soup = BeautifulSoup(response.text, "html.parser")
+                links = (
+                    soup.select("a.result__a")
+                    or soup.select("a.result__url")
+                    or soup.select("a.result-link")
+                )
+                snippets = soup.select("a.result__snippet") or soup.select(
+                    ".result__snippet"
+                )
+                added = 0
+                for i, a in enumerate(links):
+                    if added >= per_company or len(out) >= limit:
+                        break
+                    link = a.get("href") or ""
+                    if "uddg=" in link:
+                        link = urllib.parse.unquote(link.split("uddg=")[1].split("&")[0])
+                    elif link.startswith("//"):
+                        link = "https:" + link
+                    elif link.startswith("/"):
+                        continue
+                    if not link.startswith("http"):
+                        continue
+                    link_host = _portal_host(link)
+                    if not link_host or any(
+                        link_host == b or link_host.endswith("." + b) for b in block_hosts
+                    ):
+                        continue
+                    key = link.rstrip("/").lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    title = (a.get_text(strip=True) or "").strip()
+                    if not title or title.startswith("http"):
+                        title = f"{term.title()} at {name}"
+                    snippet = ""
+                    if i < len(snippets):
+                        snippet = snippets[i].get_text(strip=True)
+                    out.append(
+                        {
+                            "id": f"watch-{abs(hash(link)) % 10_000_000}",
+                            "title": title[:160],
+                            "company_name": name,
+                            "candidate_required_location": loc or "Remote",
+                            "salary": "Competitive",
+                            "url": link,
+                            "description": snippet
+                            or f"Watchlist match for {name} via Loop Engineer search.",
+                            "publication_date": None,
+                            "source": "company_watchlist",
+                        }
+                    )
+                    added += 1
+        logger.info(
+            "Company watchlist search: %d companies → %d hits", len(companies), len(out)
+        )
+        return out
+
     async def fetch_web_search(
         self,
         search_term: str,
@@ -711,6 +859,7 @@ class JobDiscoveryAgent:
         is_remote: bool,
         location_hubs: list[str],
         user_id: Optional[str] = None,
+        preferences: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         settings = get_settings()
         search_term = (
@@ -736,6 +885,13 @@ class JobDiscoveryAgent:
             "arbeitnow",
             "web_search",
         ]
+        prefs = preferences or {}
+        watchlist_only = bool(prefs.get("watchlistOnly"))
+        watchlist = await self.load_company_watchlist(user_id or "")
+        if watchlist and "company_watchlist" not in sources:
+            sources = ["company_watchlist"] + list(sources)
+        if watchlist_only:
+            sources = ["company_watchlist"]
 
         vault_sites: List[Dict[str, str]] = []
         if "vault_portals" in sources:
@@ -754,9 +910,19 @@ class JobDiscoveryAgent:
             "web_search": lambda term, lim: self.fetch_web_search(
                 term, location, lim
             ),
+            "company_watchlist": lambda term, lim: self.fetch_watchlist_companies(
+                term, location, lim, watchlist
+            ),
         }
-        # Vault first, boards, then open web as fill (ai-job-search WebSearch pattern)
-        priority = ("vault_portals", "remotive", "remoteok", "arbeitnow", "web_search")
+        # Watchlist + Vault first, boards, then open web
+        priority = (
+            "company_watchlist",
+            "vault_portals",
+            "remotive",
+            "remoteok",
+            "arbeitnow",
+            "web_search",
+        )
         ordered = [s for s in priority if s in sources] + [
             s for s in sources if s not in priority
         ]
@@ -768,6 +934,8 @@ class JobDiscoveryAgent:
                 lim = vault_limit
             elif src == "web_search":
                 lim = web_limit
+            elif src == "company_watchlist":
+                lim = max(4, vault_limit if watchlist_only else min(vault_limit, 10))
             else:
                 lim = board_limit
             try:
@@ -789,19 +957,24 @@ class JobDiscoveryAgent:
                 seen_urls.add(key)
                 combined.append(j)
 
-        # Prefer Vault → boards → web
+        # Prefer watchlist → Vault → boards → web
+        watch = [j for j in combined if j.get("source") == "company_watchlist"]
         vault = [j for j in combined if j.get("source") == "vault_portals"]
         web = [j for j in combined if j.get("source") == "web_search"]
         boards = [
             j
             for j in combined
-            if j.get("source") not in ("vault_portals", "web_search")
+            if j.get("source") not in ("company_watchlist", "vault_portals", "web_search")
         ]
-        keep_vault = min(len(vault), max_results)
-        remaining = max_results - keep_vault
+        if watchlist_only:
+            return watch[:max_results]
+        keep_watch = min(len(watch), max(4, max_results // 4))
+        remaining = max_results - keep_watch
+        keep_vault = min(len(vault), max(remaining // 2, 4))
+        remaining = remaining - keep_vault
         keep_boards = min(len(boards), max(remaining // 2, remaining - len(web)))
         keep_web = max(0, remaining - keep_boards)
-        out = vault[:keep_vault] + boards[:keep_boards] + web[:keep_web]
+        out = watch[:keep_watch] + vault[:keep_vault] + boards[:keep_boards] + web[:keep_web]
         return out[:max_results]
 
     async def discover_and_score_jobs(
@@ -823,7 +996,7 @@ class JobDiscoveryAgent:
         is_remote = preferences.get("isRemote", True)
         location_hubs = preferences.get("locationHubs", [])
         live_jobs = await self.fetch_live_jobs(
-            target_roles, is_remote, location_hubs, user_id=user_id
+            target_roles, is_remote, location_hubs, user_id=user_id, preferences=preferences
         )
         work_auth = str(preferences.get("workAuthorization") or "").strip()
         if work_auth in ("opt", "needs_sponsorship") and live_jobs:
