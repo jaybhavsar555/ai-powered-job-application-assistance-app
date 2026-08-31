@@ -82,6 +82,10 @@ class LoopEngineerService:
             "resume_refresh_hint": True,
             "auto_build_packets": True,
             "notify_email": True,
+            "notify_telegram": False,
+            "notify_whatsapp": False,
+            "telegram_chat_id": "",
+            "whatsapp_phone": "",
             "philosophy": (
                 "Loop Engineer scans on a schedule, scores with your local/cloud LLM, "
                 "then waits for your shortlist approval in Pipeline — no silent apply."
@@ -211,6 +215,14 @@ class LoopEngineerService:
             current["auto_build_packets"] = bool(patch["auto_build_packets"])
         if "notify_email" in patch:
             current["notify_email"] = bool(patch["notify_email"])
+        if "notify_telegram" in patch:
+            current["notify_telegram"] = bool(patch["notify_telegram"])
+        if "notify_whatsapp" in patch:
+            current["notify_whatsapp"] = bool(patch["notify_whatsapp"])
+        if "telegram_chat_id" in patch:
+            current["telegram_chat_id"] = str(patch["telegram_chat_id"] or "").strip()
+        if "whatsapp_phone" in patch:
+            current["whatsapp_phone"] = str(patch["whatsapp_phone"] or "").strip()
         if isinstance(patch.get("preferences"), dict):
             current["preferences"] = {**current["preferences"], **patch["preferences"]}
         path = _user_schedule_path(user_id)
@@ -429,6 +441,9 @@ class LoopEngineerService:
         from app.application.services.job_packet import JobPacketService
 
         packets = JobPacketService(self.db).list_packets(user_id, limit=20)
+        from app.application.services.loop_notify import LoopNotifyService
+
+        notify_channels = LoopNotifyService(self.db).channel_status(schedule)
         llm = runtime_status()
         return {
             "watchlist": watchlist,
@@ -438,6 +453,7 @@ class LoopEngineerService:
             "digest": digest,
             "packets": packets,
             "packets_pending": len([p for p in packets if p.get("status") == "pending_review"]),
+            "notify_channels": notify_channels,
             "llm": llm,
             "recommended_models": {
                 "ollama": ["qwen2.5:3b", "deepseek-r1:1.5b"],

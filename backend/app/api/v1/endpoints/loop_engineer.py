@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,7 +31,15 @@ class SchedulePatch(BaseModel):
     resume_refresh_hint: Optional[bool] = None
     auto_build_packets: Optional[bool] = None
     notify_email: Optional[bool] = None
+    notify_telegram: Optional[bool] = None
+    notify_whatsapp: Optional[bool] = None
+    telegram_chat_id: Optional[str] = None
+    whatsapp_phone: Optional[str] = None
     preferences: Optional[Dict[str, Any]] = None
+
+
+class NotifyTestBody(BaseModel):
+    channel: str = Field(..., description="email | telegram | whatsapp")
 
 
 class ConfirmPacketBody(BaseModel):
@@ -214,3 +222,148 @@ async def build_packets_for_run(
         schedule=loop_svc.get_schedule(current_user.id),
     )
     return {"packets": built, "notify": notify}
+
+
+@router.get("/notify/channels")
+async def notify_channels(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.application.services.loop_notify import LoopNotifyService
+    from app.infrastructure.messaging.telegram import get_bot_info, telegram_configured
+
+    loop_svc = LoopEngineerService(db)
+    schedule = loop_svc.get_schedule(current_user.id)
+    notify = LoopNotifyService(db)
+    bot = await get_bot_info() if telegram_configured() else None
+    return {
+        "channels": notify.channel_status(schedule),
+        "telegram_bot": bot,
+        "schedule": {
+            "notify_email": schedule.get("notify_email"),
+            "notify_telegram": schedule.get("notify_telegram"),
+            "notify_whatsapp": schedule.get("notify_whatsapp"),
+            "telegram_chat_id": schedule.get("telegram_chat_id") or "",
+            "whatsapp_phone": schedule.get("whatsapp_phone") or "",
+        },
+    }
+
+
+@router.post("/notify/telegram/link-code")
+async def telegram_link_code(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate a one-time code — send `/link CODE` to your Career OS Telegram bot."""
+    from app.infrastructure.messaging.telegram_link import create_link_code
+    from app.infrastructure.messaging.telegram import get_bot_info, telegram_configured
+
+    if not telegram_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="TELEGRAM_BOT_TOKEN not set on server. Add it to backend/.env",
+        )
+    code = create_link_code(current_user.id)
+    bot = await get_bot_info()
+    username = (bot or {}).get("username") or "YourBot"
+    return {
+        "code": code,
+        "expires_minutes": 60,
+        "instructions": (
+            f"1. Open Telegram and search @{username}\n"
+            f"2. Send: /link {code}\n"
+            "3. Your chat will be linked for packet alerts."
+        ),
+        "bot_username": username,
+        "bot_url": f"https://t.me/{username}",
+    }
+
+
+@router.post("/notify/telegram/webhook")
+async def telegram_webhook(request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Telegram bot webhook — handles /link CODE to save chat_id.
+    Register in production: setWebhook → /api/v1/loop-engineer/notify/telegram/webhook
+    """
+    from app.core.config import get_settings
+    from app.infrastructure.messaging.telegram_link import consume_link_code
+    from app.infrastructure.messaging.telegram import send_telegram_message
+
+    settings = get_settings()
+    secret = (settings.TELEGRAM_WEBHOOK_SECRET or "").strip()
+    if secret and request.query_params.get("secret") != secret:
+        raise HTTPException(status_code=403, detail="Invalid webhook secret")
+
+    try:
+        update = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    message = (update.get("message") or {})
+    chat = message.get("chat") or {}
+    chat_id = str(chat.get("id") or "")
+    text = (message.get("text") or "").strip()
+
+    if not chat_id or not text:
+        return {"ok": True}
+
+    if text.lower().startswith("/start"):
+        await send_telegram_message(
+            chat_id,
+            "Career OS Loop Engineer bot.\n\n"
+            "Get a link code from /loop in Career OS, then send:\n"
+            "/link YOUR_CODE",
+        )
+        return {"ok": True}
+
+    if text.lower().startswith("/link"):
+        parts = text.split(maxsplit=1)
+        if len(parts) < 2:
+            await send_telegram_message(chat_id, "Usage: /link ABCD1234")
+            return {"ok": True}
+        code = parts[1].strip().upper()
+        user_id = consume_link_code(code)
+        if not user_id:
+            await send_telegram_message(
+                chat_id, "Invalid or expired code. Generate a new one in Career OS /loop."
+            )
+            return {"ok": True}
+
+        from uuid import UUID
+
+        loop_svc = LoopEngineerService(db)
+        loop_svc.save_schedule(
+            UUID(user_id),
+            {
+                "telegram_chat_id": chat_id,
+                "notify_telegram": True,
+            },
+        )
+        await send_telegram_message(
+            chat_id,
+            "Linked! You will receive job packet alerts here when Loop Engineer scans.",
+        )
+        return {"ok": True, "linked_user_id": user_id}
+
+    return {"ok": True}
+
+
+@router.post("/notify/test")
+async def notify_test(
+    body: NotifyTestBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.application.services.loop_notify import LoopNotifyService
+
+    loop_svc = LoopEngineerService(db)
+    schedule = loop_svc.get_schedule(current_user.id)
+    result = await LoopNotifyService(db).send_test(
+        current_user.id, schedule, channel=body.channel.strip().lower()
+    )
+    if not result.get("sent"):
+        raise HTTPException(
+            status_code=400,
+            detail=result.get("error") or result.get("reason") or "Test send failed",
+        )
+    return result

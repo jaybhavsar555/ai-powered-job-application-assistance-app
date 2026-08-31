@@ -40,6 +40,10 @@ interface LoopSchedule {
   watchlist_only: boolean;
   auto_build_packets?: boolean;
   notify_email?: boolean;
+  notify_telegram?: boolean;
+  notify_whatsapp?: boolean;
+  telegram_chat_id?: string;
+  whatsapp_phone?: string;
   last_run_at?: string | null;
   last_run_id?: string | null;
   last_run_jobs?: number;
@@ -94,6 +98,11 @@ interface LoopStatus {
   digest: { text: string; href: string; run_id?: string }[];
   packets?: PacketSummary[];
   packets_pending?: number;
+  notify_channels?: {
+    email?: { configured?: boolean; enabled?: boolean };
+    telegram?: { configured?: boolean; enabled?: boolean; chat_id_set?: boolean };
+    whatsapp?: { configured?: boolean; enabled?: boolean; phone_set?: boolean; provider?: string };
+  };
   llm?: { provider?: string; model?: string };
   recommended_models?: Record<string, string[]>;
 }
@@ -114,6 +123,15 @@ export default function LoopEngineerPage() {
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [autoBuildPackets, setAutoBuildPackets] = useState(true);
   const [notifyEmail, setNotifyEmail] = useState(true);
+  const [notifyTelegram, setNotifyTelegram] = useState(false);
+  const [notifyWhatsapp, setNotifyWhatsapp] = useState(false);
+  const [telegramChatId, setTelegramChatId] = useState("");
+  const [whatsappPhone, setWhatsappPhone] = useState("");
+  const [linkCodeInfo, setLinkCodeInfo] = useState<{
+    code?: string;
+    instructions?: string;
+    bot_url?: string;
+  } | null>(null);
   const [packets, setPackets] = useState<PacketSummary[]>([]);
   const [selectedPacket, setSelectedPacket] = useState<PacketDetail | null>(null);
   const [packetBusy, setPacketBusy] = useState(false);
@@ -143,6 +161,10 @@ export default function LoopEngineerPage() {
       setScheduleEnabled(sched.enabled ?? false);
       setAutoBuildPackets(sched.auto_build_packets ?? true);
       setNotifyEmail(sched.notify_email ?? true);
+      setNotifyTelegram(sched.notify_telegram ?? false);
+      setNotifyWhatsapp(sched.notify_whatsapp ?? false);
+      setTelegramChatId(sched.telegram_chat_id || "");
+      setWhatsappPhone(sched.whatsapp_phone || "");
       setPackets(data.packets || []);
     } catch {
       /* ignore */
@@ -239,6 +261,10 @@ export default function LoopEngineerPage() {
           },
           auto_build_packets: autoBuildPackets,
           notify_email: notifyEmail,
+          notify_telegram: notifyTelegram,
+          notify_whatsapp: notifyWhatsapp,
+          telegram_chat_id: telegramChatId,
+          whatsapp_phone: whatsappPhone,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -360,6 +386,70 @@ export default function LoopEngineerPage() {
       });
     } catch (err) {
       setBanner(messageFromError(err, "Run now failed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const generateTelegramLink = async () => {
+    setBusy(true);
+    setLinkCodeInfo(null);
+    try {
+      const res = await fetch("/api/v1/loop-engineer/notify/telegram/link-code", {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof data.detail === "string" ? data.detail : "Could not generate link code"
+        );
+      }
+      setLinkCodeInfo(data);
+      setBanner({
+        tone: "success",
+        title: "Telegram link code",
+        detail: `Send /link ${data.code} to @${data.bot_username || "your bot"}`,
+      });
+    } catch (err) {
+      setBanner(messageFromError(err, "Telegram link failed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const testNotify = async (channel: string) => {
+    setBusy(true);
+    try {
+      await saveSchedule({
+        enabled: scheduleEnabled,
+        interval_hours: intervalHours,
+        watchlist_only: watchlistOnly,
+        auto_build_packets: autoBuildPackets,
+        notify_email: notifyEmail,
+        notify_telegram: notifyTelegram,
+        notify_whatsapp: notifyWhatsapp,
+        telegram_chat_id: telegramChatId,
+        whatsapp_phone: whatsappPhone,
+      });
+      const res = await fetch("/api/v1/loop-engineer/notify/test", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ channel }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof data.detail === "string" ? data.detail : "Test failed"
+        );
+      }
+      setBanner({
+        tone: "success",
+        title: `${channel} test sent`,
+        detail: "Check your phone or app for the test message.",
+      });
+    } catch (err) {
+      setBanner(messageFromError(err, "Notification test failed"));
     } finally {
       setBusy(false);
     }
@@ -510,6 +600,108 @@ export default function LoopEngineerPage() {
             Email me when packets are ready (SMTP or mock in dev)
           </label>
 
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={notifyTelegram}
+              onChange={(e) => setNotifyTelegram(e.target.checked)}
+              disabled={!status?.notify_channels?.telegram?.configured}
+            />
+            Telegram alerts
+            {!status?.notify_channels?.telegram?.configured ? (
+              <span className="text-xs text-muted-foreground">(set TELEGRAM_BOT_TOKEN)</span>
+            ) : null}
+          </label>
+
+          {notifyTelegram ? (
+            <div className="rounded-lg border bg-muted/20 p-3 space-y-2 text-sm">
+              <p className="text-xs text-muted-foreground">
+                Link via bot (recommended) or paste chat ID from @userinfobot
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void generateTelegramLink()}
+                  className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                >
+                  Generate link code
+                </button>
+                {linkCodeInfo?.bot_url ? (
+                  <a
+                    href={linkCodeInfo.bot_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-primary underline"
+                  >
+                    Open bot
+                  </a>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={busy || !telegramChatId}
+                  onClick={() => void testNotify("telegram")}
+                  className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                >
+                  Test Telegram
+                </button>
+              </div>
+              {linkCodeInfo?.code ? (
+                <p className="text-xs font-mono bg-background border rounded px-2 py-1">
+                  /link {linkCodeInfo.code}
+                </p>
+              ) : null}
+              <input
+                className="w-full rounded-md border bg-background px-3 py-2 text-xs"
+                placeholder="Telegram chat ID (optional if linked via bot)"
+                value={telegramChatId}
+                onChange={(e) => setTelegramChatId(e.target.value)}
+              />
+            </div>
+          ) : null}
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={notifyWhatsapp}
+              onChange={(e) => setNotifyWhatsapp(e.target.checked)}
+              disabled={!status?.notify_channels?.whatsapp?.configured}
+            />
+            WhatsApp alerts
+            {!status?.notify_channels?.whatsapp?.configured ? (
+              <span className="text-xs text-muted-foreground">
+                (set WHATSAPP_PROVIDER=meta or twilio)
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                ({status?.notify_channels?.whatsapp?.provider})
+              </span>
+            )}
+          </label>
+
+          {notifyWhatsapp ? (
+            <div className="rounded-lg border bg-muted/20 p-3 space-y-2 text-sm">
+              <p className="text-xs text-muted-foreground">
+                E.164 format e.g. +14155552671. Meta: message your business number first
+                to open the 24h window.
+              </p>
+              <input
+                className="w-full rounded-md border bg-background px-3 py-2 text-xs"
+                placeholder="+1234567890"
+                value={whatsappPhone}
+                onChange={(e) => setWhatsappPhone(e.target.value)}
+              />
+              <button
+                type="button"
+                disabled={busy || !whatsappPhone}
+                onClick={() => void testNotify("whatsapp")}
+                className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+              >
+                Test WhatsApp
+              </button>
+            </div>
+          ) : null}
+
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-sm space-y-1">
               <span className="text-muted-foreground">Target roles</span>
@@ -552,6 +744,10 @@ export default function LoopEngineerPage() {
                   watchlist_only: watchlistOnly,
                   auto_build_packets: autoBuildPackets,
                   notify_email: notifyEmail,
+                  notify_telegram: notifyTelegram,
+                  notify_whatsapp: notifyWhatsapp,
+                  telegram_chat_id: telegramChatId,
+                  whatsapp_phone: whatsappPhone,
                 })
               }
               className="rounded-md border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"

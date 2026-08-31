@@ -125,6 +125,16 @@ class Settings(BaseSettings):
     LOOP_ENGINEER_NOTIFY_EMAIL: bool = True
     LOOP_ENGINEER_AUTO_BUILD_PACKETS: bool = True
     LOOP_ENGINEER_FRONTEND_URL: str = "http://localhost:3000"
+    # Telegram Bot API — packet alerts (free)
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_WEBHOOK_SECRET: str = ""
+    # WhatsApp — meta (Cloud API) or twilio
+    WHATSAPP_PROVIDER: str = ""  # meta | twilio
+    WHATSAPP_META_ACCESS_TOKEN: str = ""
+    WHATSAPP_META_PHONE_NUMBER_ID: str = ""
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_WHATSAPP_FROM: str = ""  # e.g. whatsapp:+14155238886
 
     model_config = SettingsConfigDict(
         env_file=".env",

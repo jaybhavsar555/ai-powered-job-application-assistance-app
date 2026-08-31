@@ -1,4 +1,4 @@
-"""Loop Engineer notifications — email digest when job packets are ready."""
+"""Loop Engineer notifications — email, Telegram, and WhatsApp."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.services.mail import MailService
 from app.application.services.job_packet import JobPacketService
 from app.core.config import get_settings
+from app.infrastructure.messaging.telegram import send_telegram_message, telegram_configured
+from app.infrastructure.messaging.whatsapp import send_whatsapp_message, whatsapp_configured
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +24,95 @@ class LoopNotifyService:
         self.packets = JobPacketService(db)
         self.settings = get_settings()
 
-    def _notify_enabled(self, schedule: Optional[Dict[str, Any]] = None) -> bool:
-        if schedule and schedule.get("notify_email") is False:
-            return False
-        return bool(getattr(self.settings, "LOOP_ENGINEER_NOTIFY_EMAIL", True))
+    def channel_status(self, schedule: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        sched = schedule or {}
+        return {
+            "email": {
+                "configured": self.mail.smtp_configured or not self.settings.is_production,
+                "enabled": sched.get("notify_email", True),
+            },
+            "telegram": {
+                "configured": telegram_configured(),
+                "enabled": bool(sched.get("notify_telegram")),
+                "chat_id_set": bool((sched.get("telegram_chat_id") or "").strip()),
+            },
+            "whatsapp": {
+                "configured": whatsapp_configured(),
+                "enabled": bool(sched.get("notify_whatsapp")),
+                "phone_set": bool((sched.get("whatsapp_phone") or "").strip()),
+                "provider": (getattr(self.settings, "WHATSAPP_PROVIDER", None) or "").strip()
+                or None,
+            },
+        }
+
+    def _build_message(
+        self,
+        unnotified: List[Dict[str, Any]],
+        *,
+        frontend_base: str,
+        run_id: Optional[str],
+    ) -> tuple[str, str]:
+        lines = []
+        for p in unnotified[:12]:
+            score = p.get("match_score") or "?"
+            lines.append(
+                f"• {p.get('title')} @ {p.get('company')} (match {score}%)\n"
+                f"  {frontend_base}/loop?packet={p.get('id')}"
+            )
+
+        subject = f"Career OS: {len(unnotified)} job packet(s) ready for review"
+        body = (
+            "Loop Engineer found roles and built research + resume previews.\n\n"
+            "Nothing was applied — confirm each job in Loop Engineer when ready.\n\n"
+            + "\n".join(lines)
+            + f"\n\nOpen: {frontend_base}/loop\n"
+        )
+        if run_id:
+            body += f"Pipeline: {frontend_base}/pipeline?run_id={run_id}\n"
+        return subject, body
+
+    async def _send_email(
+        self,
+        user_id: UUID,
+        schedule: Dict[str, Any],
+        subject: str,
+        body: str,
+    ) -> Dict[str, Any]:
+        if schedule.get("notify_email") is False:
+            return {"sent": False, "reason": "notify_email disabled"}
+        if not bool(getattr(self.settings, "LOOP_ENGINEER_NOTIFY_EMAIL", True)):
+            return {"sent": False, "reason": "LOOP_ENGINEER_NOTIFY_EMAIL=false"}
+
+        to_email = await self.packets.get_user_email(user_id)
+        if not to_email:
+            return {"sent": False, "reason": "no user email"}
+
+        try:
+            sent = self.mail.send_email(to_email, subject, body)
+            return {"sent": sent, "to": to_email}
+        except Exception as exc:
+            logger.warning("Loop notify email failed: %s", exc)
+            return {"sent": False, "error": str(exc), "to": to_email}
+
+    async def _send_telegram(
+        self, schedule: Dict[str, Any], body: str
+    ) -> Dict[str, Any]:
+        if not schedule.get("notify_telegram"):
+            return {"sent": False, "reason": "notify_telegram disabled"}
+        chat_id = (schedule.get("telegram_chat_id") or "").strip()
+        if not chat_id:
+            return {"sent": False, "reason": "telegram_chat_id not set"}
+        return await send_telegram_message(chat_id, body)
+
+    async def _send_whatsapp(
+        self, schedule: Dict[str, Any], body: str
+    ) -> Dict[str, Any]:
+        if not schedule.get("notify_whatsapp"):
+            return {"sent": False, "reason": "notify_whatsapp disabled"}
+        phone = (schedule.get("whatsapp_phone") or "").strip()
+        if not phone:
+            return {"sent": False, "reason": "whatsapp_phone not set"}
+        return await send_whatsapp_message(phone, body)
 
     async def notify_packets_ready(
         self,
@@ -33,63 +120,60 @@ class LoopNotifyService:
         *,
         run_id: Optional[str] = None,
         schedule: Optional[Dict[str, Any]] = None,
-        frontend_base: str = "http://localhost:3000",
+        frontend_base: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Email user when new pending_review packets exist (once per batch).
-        Falls back to inbox digest when SMTP not configured.
-        """
-        if not self._notify_enabled(schedule):
-            return {"sent": False, "reason": "notify_email disabled"}
+        """Notify via all enabled channels when new packets exist."""
+        schedule = schedule or {}
+        base = frontend_base or getattr(
+            self.settings, "LOOP_ENGINEER_FRONTEND_URL", "http://localhost:3000"
+        )
 
         pending = self.packets.list_packets(user_id, status="pending_review", run_id=run_id)
         unnotified = [p for p in pending if not p.get("notified_at")]
         if not unnotified:
-            return {"sent": False, "reason": "no new packets"}
+            return {"sent": False, "reason": "no new packets", "channels": {}}
 
-        to_email = await self.packets.get_user_email(user_id)
-        if not to_email:
-            return {"sent": False, "reason": "no user email"}
+        subject, body = self._build_message(unnotified, frontend_base=base, run_id=run_id)
 
-        lines = []
-        for p in unnotified[:12]:
-            score = p.get("match_score") or "?"
-            lines.append(
-                f"• {p.get('title')} @ {p.get('company')} (match {score}%)\n"
-                f"  Review: {frontend_base}/loop?packet={p.get('id')}"
-            )
+        channels: Dict[str, Any] = {}
+        channels["email"] = await self._send_email(user_id, schedule, subject, body)
+        channels["telegram"] = await self._send_telegram(schedule, body)
+        channels["whatsapp"] = await self._send_whatsapp(schedule, body)
 
-        subject = (
-            f"Career OS: {len(unnotified)} job packet(s) ready for your review"
-        )
-        body = (
-            "Loop Engineer found roles and built research + resume previews.\n\n"
-            "Nothing was applied — confirm each job in Loop Engineer when ready.\n\n"
-            + "\n".join(lines)
-            + f"\n\nOpen Loop Engineer: {frontend_base}/loop\n"
-            + f"Pipeline run: {frontend_base}/pipeline"
-            + (f"?run_id={run_id}" if run_id else "")
-            + "\n"
-        )
-
-        sent = False
-        error = None
-        try:
-            sent = self.mail.send_email(to_email, subject, body)
-        except Exception as exc:
-            error = str(exc)
-            logger.warning("Loop notify email failed: %s", exc)
-
-        if sent:
+        any_sent = any(ch.get("sent") for ch in channels.values())
+        if any_sent:
             self.packets.mark_notified(
                 user_id, [str(p["id"]) for p in unnotified if p.get("id")]
             )
 
         return {
-            "sent": sent,
-            "to": to_email,
+            "sent": any_sent,
             "packet_count": len(unnotified),
-            "smtp_configured": self.mail.smtp_configured,
-            "error": error,
-            "fallback": "Check Inbox digest and /loop if email did not arrive.",
+            "channels": channels,
+            "fallback": "Check Inbox digest and /loop if no message arrived.",
         }
+
+    async def send_test(
+        self,
+        user_id: UUID,
+        schedule: Dict[str, Any],
+        *,
+        channel: str,
+    ) -> Dict[str, Any]:
+        base = getattr(self.settings, "LOOP_ENGINEER_FRONTEND_URL", "http://localhost:3000")
+        body = (
+            "Career OS Loop Engineer test notification.\n\n"
+            f"When job packets are ready you will get links like:\n{base}/loop\n"
+        )
+        if channel == "email":
+            return await self._send_email(
+                user_id,
+                {**schedule, "notify_email": True},
+                "Career OS — test notification",
+                body,
+            )
+        if channel == "telegram":
+            return await self._send_telegram({**schedule, "notify_telegram": True}, body)
+        if channel == "whatsapp":
+            return await self._send_whatsapp({**schedule, "notify_whatsapp": True}, body)
+        return {"sent": False, "error": f"unknown channel: {channel}"}

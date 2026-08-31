@@ -71,11 +71,11 @@ SMTP_HOST=...   # optional; without it dev logs mock email
 
 | Channel | Implementation |
 |---------|----------------|
-| **Email** | Done (v2) — batch digest per scan |
+| **Email** | Done (v2) |
+| **Telegram** | Done — bot + `/link CODE` webhook |
+| **WhatsApp** | Done — Meta Cloud API or Twilio |
 | **Inbox** | Done — digest lines link to `/loop` |
-| **Browser push** | Service worker + `POST /loop-engineer/subscribe-push` |
-| **Slack** | Webhook in schedule.json → post packet summary |
-| **SMS** | Twilio optional (high friction; email first) |
+| **Browser push** | Planned — service worker |
 
 **Trigger:** after `build_packets_for_run`, call all enabled channels once per batch.
 
