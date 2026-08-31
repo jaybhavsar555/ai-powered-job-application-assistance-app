@@ -116,6 +116,11 @@ class Settings(BaseSettings):
     JOB_DISCOVERY_MAX_RESULTS: int = 20
     # File-backed Search Pipeline runs (approve-at-each-gate)
     SEARCH_PIPELINE_DIR: str = "./data/pipelines"
+    # Loop Engineer — scheduled watchlist scans (file-backed schedules)
+    LOOP_ENGINEER_DIR: str = "./data/loop_engineer"
+    LOOP_ENGINEER_ENABLED: bool = True
+    LOOP_ENGINEER_INTERVAL_HOURS: int = 24
+    LOOP_ENGINEER_TICK_MINUTES: int = 30
 
     model_config = SettingsConfigDict(
         env_file=".env",

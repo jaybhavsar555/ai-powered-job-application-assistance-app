@@ -27,6 +27,13 @@ _FRESH_APPLY_STAGES = frozenset(
 _START_APPLY_STAGES = frozenset({"Wishlist", "Ready", "Reapply", "Researching"})
 
 
+def _loop_engineer_digest(db_sync: AsyncSession, user_id) -> list[dict[str, Any]]:
+    from app.application.services.loop_engineer import LoopEngineerService
+
+    svc = LoopEngineerService(db_sync)
+    return svc.digest_lines(user_id)
+
+
 # Optim Hire–style apply loop (Review & Apply). Auto board-submit is NOT claimed.
 PIPELINE_STEPS = [
     {
@@ -489,6 +496,9 @@ async def get_inbox_summary(
         digest_lines.append(
             f"{failed_count} Failed / {reapply_count} Reapply — fix then resume."
         )
+    loop_lines = _loop_engineer_digest(db, current_user.id)
+    for item in loop_lines:
+        digest_lines.append(item.get("text") or "")
     if not digest_lines:
         digest_lines.append("Quiet day — run Discovery or import a portal URL.")
 
@@ -547,6 +557,7 @@ async def get_inbox_summary(
         "digest": {
             "headline": "Career OS daily digest",
             "summary_lines": digest_lines,
+            "loop_engineer": loop_lines,
         },
         "positioning": {
             "headline": "Tailored resume + cover + outreach — then autofill the form",
@@ -600,6 +611,9 @@ async def get_daily_digest(
         lines.append(
             f"{len(failed)} Failed / {len(reapply)} Reapply — fix blockers then resume."
         )
+    loop_lines = _loop_engineer_digest(db, current_user.id)
+    for item in loop_lines:
+        lines.append(item.get("text") or "")
     if not lines:
         lines.append("Quiet day — run Discovery or import a portal URL.")
 
@@ -608,6 +622,7 @@ async def get_daily_digest(
         "headline": "Career OS daily digest",
         "apply_mode": prefs.get("apply_mode"),
         "summary_lines": lines,
+        "loop_engineer": loop_lines,
         "new_jobs_48h": new_jobs_48h[:8],
         "ready": [_brief(a) for a in ready[:8]],
         "follow_ups_due": follow_ups[:8],

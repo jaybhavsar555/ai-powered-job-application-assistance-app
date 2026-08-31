@@ -22,6 +22,7 @@ from app.api.v1.endpoints import (
     extension,
     apply_prefs,
     search_pipeline,
+    loop_engineer,
     obsidian,
 )
 
@@ -57,5 +58,8 @@ api_router.include_router(
 )
 api_router.include_router(
     search_pipeline.router, prefix="/search-pipeline", tags=["search-pipeline"]
+)
+api_router.include_router(
+    loop_engineer.router, prefix="/loop-engineer", tags=["loop-engineer"]
 )
 api_router.include_router(obsidian.router, prefix="/obsidian", tags=["obsidian"])

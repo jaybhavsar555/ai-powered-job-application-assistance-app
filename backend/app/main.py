@@ -53,7 +53,22 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         print(f"[Checkpointer] Startup skipped: {exc}")
 
+    try:
+        from app.infrastructure.scheduler import start_loop_engineer_scheduler
+
+        start_loop_engineer_scheduler()
+        print("[LoopEngineer] Scheduler started")
+    except Exception as exc:
+        print(f"[LoopEngineer] Scheduler startup skipped: {exc}")
+
     yield
+
+    try:
+        from app.infrastructure.scheduler import stop_loop_engineer_scheduler
+
+        stop_loop_engineer_scheduler()
+    except Exception as exc:
+        print(f"[LoopEngineer] Scheduler shutdown skipped: {exc}")
 
     try:
         from app.infrastructure.checkpoints import close_checkpointer

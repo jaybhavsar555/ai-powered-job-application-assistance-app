@@ -24,6 +24,7 @@ import {
   Wand2,
   Radar,
   Brain,
+  Repeat,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useModeStore } from "@/store/modeStore";
@@ -34,6 +35,7 @@ const simplePrimary: NavItem[] = [
   { name: "Inbox", href: "/inbox", icon: LayoutDashboard },
   { name: "Jobs", href: "/jobs", icon: Store },
   { name: "Pipeline", href: "/pipeline", icon: Radar },
+  { name: "Loop Engineer", href: "/loop", icon: Repeat },
   { name: "Tailor", href: "/tailor", icon: Wand2 },
   { name: "Resumes", href: "/resumes", icon: FileText },
   { name: "Quick Apply", href: "/quick-apply", icon: Send },
@@ -61,6 +63,7 @@ const advancedNavItems: NavItem[] = [
   { name: "Apply", href: "/apply", icon: Sparkles },
   { name: "Canvas", href: "/canvas", icon: BrainCircuit },
   { name: "Pipeline", href: "/pipeline", icon: Radar },
+  { name: "Loop Engineer", href: "/loop", icon: Repeat },
   { name: "Approvals", href: "/approvals", icon: ClipboardCheck },
   { name: "Second Brain", href: "/second-brain", icon: Brain },
   { name: "Knowledge Vault", href: "/vault", icon: Database },
