@@ -125,6 +125,13 @@ class Settings(BaseSettings):
     LOOP_ENGINEER_NOTIFY_EMAIL: bool = True
     LOOP_ENGINEER_AUTO_BUILD_PACKETS: bool = True
     LOOP_ENGINEER_FRONTEND_URL: str = "http://localhost:3000"
+    LOOP_ENGINEER_AUTO_PACKAGE_ON_CONFIRM: bool = True
+    LOOP_ENGINEER_SYNC_PORTFOLIO_ON_CONFIRM: bool = True
+    PORTFOLIO_EXPORT_DIR: str = "./data/portfolio"
+    # Web Push (browser notifications) — generate with: python scripts/generate_vapid_keys.py
+    WEB_PUSH_VAPID_PUBLIC_KEY: str = ""
+    WEB_PUSH_VAPID_PRIVATE_KEY: str = ""
+    WEB_PUSH_VAPID_SUBJECT: str = "mailto:admin@localhost"
     # Telegram Bot API — packet alerts (free)
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_WEBHOOK_SECRET: str = ""

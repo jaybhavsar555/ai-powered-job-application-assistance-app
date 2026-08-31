@@ -3,7 +3,7 @@
   "name": "Career OS Autofill",
   "version": "1.1.0",
   "description": "Autofill ATS forms and attach resume. You click Submit (unless gated Auto).",
-  "permissions": ["storage", "activeTab", "scripting"],
+  "permissions": ["storage", "activeTab", "scripting", "alarms", "notifications"],
   "host_permissions": [
     "http://localhost:8001/*",
     "http://127.0.0.1:8001/*"

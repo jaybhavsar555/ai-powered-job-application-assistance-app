@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,18 +33,31 @@ class SchedulePatch(BaseModel):
     notify_email: Optional[bool] = None
     notify_telegram: Optional[bool] = None
     notify_whatsapp: Optional[bool] = None
+    notify_push: Optional[bool] = None
     telegram_chat_id: Optional[str] = None
     whatsapp_phone: Optional[str] = None
+    sync_portfolio_on_confirm: Optional[bool] = None
+    auto_package_on_confirm: Optional[bool] = None
     preferences: Optional[Dict[str, Any]] = None
 
 
 class NotifyTestBody(BaseModel):
-    channel: str = Field(..., description="email | telegram | whatsapp")
+    channel: str = Field(..., description="email | telegram | whatsapp | push")
 
 
 class ConfirmPacketBody(BaseModel):
     start_apply: bool = True
-    generate_package: bool = False
+    generate_package: Optional[bool] = None
+    sync_portfolio: Optional[bool] = None
+
+
+class BatchPacketBody(BaseModel):
+    packet_ids: List[str] = Field(default_factory=list)
+    start_apply: bool = True
+
+
+class PushSubscribeBody(BaseModel):
+    subscription: Dict[str, Any]
 
 
 @router.get("/status")
@@ -185,6 +198,7 @@ async def confirm_packet(
         packet_id,
         start_apply=body.start_apply,
         generate_package=body.generate_package,
+        sync_portfolio=body.sync_portfolio,
     )
 
 
@@ -198,6 +212,111 @@ async def reject_packet(
 
     svc = JobPacketService(db)
     return svc.reject_packet(current_user.id, packet_id)
+
+
+@router.post("/packets/batch-confirm")
+async def batch_confirm_packets(
+    body: BatchPacketBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.application.services.job_packet import JobPacketService
+
+    svc = JobPacketService(db)
+    return await svc.batch_confirm(
+        current_user.id, body.packet_ids, start_apply=body.start_apply
+    )
+
+
+@router.post("/packets/batch-reject")
+async def batch_reject_packets(
+    body: BatchPacketBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.application.services.job_packet import JobPacketService
+
+    svc = JobPacketService(db)
+    return svc.batch_reject(current_user.id, body.packet_ids)
+
+
+@router.get("/portfolio/status")
+async def portfolio_status(
+    current_user: User = Depends(get_current_user),
+):
+    from app.application.services.portfolio_export import PortfolioExportService
+
+    return PortfolioExportService().get_export_paths(current_user.id)
+
+
+@router.get("/portfolio/preview")
+async def portfolio_preview(
+    current_user: User = Depends(get_current_user),
+):
+    from fastapi.responses import HTMLResponse
+    from app.application.services.portfolio_export import PortfolioExportService
+
+    html = PortfolioExportService().read_html(current_user.id)
+    if not html:
+        raise HTTPException(status_code=404, detail="No portfolio export yet — confirm a packet first.")
+    return HTMLResponse(content=html)
+
+
+@router.post("/portfolio/export-latest")
+async def portfolio_export_latest(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-export portfolio from the most recent confirmed packet."""
+    from app.application.services.job_packet import JobPacketService
+    from app.application.services.portfolio_export import PortfolioExportService
+
+    pkt_svc = JobPacketService(db)
+    packets = pkt_svc.list_packets(current_user.id, limit=50)
+    confirmed = next((p for p in packets if p.get("status") == "confirmed"), None)
+    if not confirmed:
+        raise HTTPException(status_code=404, detail="No confirmed packet to export from.")
+    full = pkt_svc.get_packet(current_user.id, str(confirmed["id"]))
+    email = await pkt_svc.get_user_email(current_user.id)
+    return PortfolioExportService().export_from_packet(
+        current_user.id, full, user_email=email
+    )
+
+
+@router.get("/notify/push/vapid-public-key")
+async def push_vapid_public_key():
+    from app.infrastructure.messaging.web_push import get_vapid_public_key, push_configured
+
+    key = get_vapid_public_key()
+    if not key:
+        raise HTTPException(
+            status_code=503,
+            detail="WEB_PUSH_VAPID_PUBLIC_KEY not set. Run: python scripts/generate_vapid_keys.py",
+        )
+    return {"publicKey": key, "configured": push_configured()}
+
+
+@router.post("/notify/push/subscribe")
+async def push_subscribe(
+    body: PushSubscribeBody,
+    current_user: User = Depends(get_current_user),
+):
+    from app.infrastructure.messaging.web_push import save_subscription
+
+    count = save_subscription(current_user.id, body.subscription)
+    return {"subscribed": True, "subscription_count": count}
+
+
+@router.post("/notify/push/unsubscribe")
+async def push_unsubscribe(
+    body: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
+):
+    from app.infrastructure.messaging.web_push import remove_subscription
+
+    endpoint = str(body.get("endpoint") or "")
+    count = remove_subscription(current_user.id, endpoint)
+    return {"unsubscribed": True, "subscription_count": count}
 
 
 @router.post("/packets/build-for-run/{run_id}")

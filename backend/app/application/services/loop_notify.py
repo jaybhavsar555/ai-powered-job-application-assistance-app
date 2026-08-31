@@ -13,6 +13,10 @@ from app.application.services.job_packet import JobPacketService
 from app.core.config import get_settings
 from app.infrastructure.messaging.telegram import send_telegram_message, telegram_configured
 from app.infrastructure.messaging.whatsapp import send_whatsapp_message, whatsapp_configured
+from app.infrastructure.messaging.web_push import (
+    push_configured,
+    send_push_to_user,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +46,10 @@ class LoopNotifyService:
                 "phone_set": bool((sched.get("whatsapp_phone") or "").strip()),
                 "provider": (getattr(self.settings, "WHATSAPP_PROVIDER", None) or "").strip()
                 or None,
+            },
+            "push": {
+                "configured": push_configured(),
+                "enabled": sched.get("notify_push", True),
             },
         }
 
@@ -114,6 +122,18 @@ class LoopNotifyService:
             return {"sent": False, "reason": "whatsapp_phone not set"}
         return await send_whatsapp_message(phone, body)
 
+    async def _send_push(
+        self,
+        user_id: UUID,
+        schedule: Dict[str, Any],
+        title: str,
+        body: str,
+        url: str,
+    ) -> Dict[str, Any]:
+        if schedule.get("notify_push") is False:
+            return {"sent": False, "reason": "notify_push disabled"}
+        return await send_push_to_user(user_id, title=title, body=body, url=url)
+
     async def notify_packets_ready(
         self,
         user_id: UUID,
@@ -139,6 +159,16 @@ class LoopNotifyService:
         channels["email"] = await self._send_email(user_id, schedule, subject, body)
         channels["telegram"] = await self._send_telegram(schedule, body)
         channels["whatsapp"] = await self._send_whatsapp(schedule, body)
+        push_url = f"{base}/loop"
+        if len(unnotified) == 1 and unnotified[0].get("id"):
+            push_url = f"{base}/loop?packet={unnotified[0]['id']}"
+        channels["push"] = await self._send_push(
+            user_id,
+            schedule,
+            subject,
+            f"{len(unnotified)} job packet(s) ready — tap to review.",
+            push_url,
+        )
 
         any_sent = any(ch.get("sent") for ch in channels.values())
         if any_sent:
@@ -176,4 +206,12 @@ class LoopNotifyService:
             return await self._send_telegram({**schedule, "notify_telegram": True}, body)
         if channel == "whatsapp":
             return await self._send_whatsapp({**schedule, "notify_whatsapp": True}, body)
+        if channel == "push":
+            return await self._send_push(
+                user_id,
+                {**schedule, "notify_push": True},
+                "Career OS — test",
+                body,
+                base + "/loop",
+            )
         return {"sent": False, "error": f"unknown channel: {channel}"}

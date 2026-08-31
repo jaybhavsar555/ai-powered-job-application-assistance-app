@@ -42,6 +42,9 @@ interface LoopSchedule {
   notify_email?: boolean;
   notify_telegram?: boolean;
   notify_whatsapp?: boolean;
+  notify_push?: boolean;
+  sync_portfolio_on_confirm?: boolean;
+  auto_package_on_confirm?: boolean;
   telegram_chat_id?: string;
   whatsapp_phone?: string;
   last_run_at?: string | null;
@@ -102,6 +105,7 @@ interface LoopStatus {
     email?: { configured?: boolean; enabled?: boolean };
     telegram?: { configured?: boolean; enabled?: boolean; chat_id_set?: boolean };
     whatsapp?: { configured?: boolean; enabled?: boolean; phone_set?: boolean; provider?: string };
+    push?: { configured?: boolean; enabled?: boolean };
   };
   llm?: { provider?: string; model?: string };
   recommended_models?: Record<string, string[]>;
@@ -125,6 +129,9 @@ export default function LoopEngineerPage() {
   const [notifyEmail, setNotifyEmail] = useState(true);
   const [notifyTelegram, setNotifyTelegram] = useState(false);
   const [notifyWhatsapp, setNotifyWhatsapp] = useState(false);
+  const [notifyPush, setNotifyPush] = useState(true);
+  const [autoPackageOnConfirm, setAutoPackageOnConfirm] = useState(true);
+  const [syncPortfolioOnConfirm, setSyncPortfolioOnConfirm] = useState(true);
   const [telegramChatId, setTelegramChatId] = useState("");
   const [whatsappPhone, setWhatsappPhone] = useState("");
   const [linkCodeInfo, setLinkCodeInfo] = useState<{
@@ -163,6 +170,9 @@ export default function LoopEngineerPage() {
       setNotifyEmail(sched.notify_email ?? true);
       setNotifyTelegram(sched.notify_telegram ?? false);
       setNotifyWhatsapp(sched.notify_whatsapp ?? false);
+      setNotifyPush(sched.notify_push ?? true);
+      setAutoPackageOnConfirm(sched.auto_package_on_confirm ?? true);
+      setSyncPortfolioOnConfirm(sched.sync_portfolio_on_confirm ?? true);
       setTelegramChatId(sched.telegram_chat_id || "");
       setWhatsappPhone(sched.whatsapp_phone || "");
       setPackets(data.packets || []);
@@ -263,8 +273,11 @@ export default function LoopEngineerPage() {
           notify_email: notifyEmail,
           notify_telegram: notifyTelegram,
           notify_whatsapp: notifyWhatsapp,
+          notify_push: notifyPush,
           telegram_chat_id: telegramChatId,
           whatsapp_phone: whatsappPhone,
+          auto_package_on_confirm: autoPackageOnConfirm,
+          sync_portfolio_on_confirm: syncPortfolioOnConfirm,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -418,6 +431,111 @@ export default function LoopEngineerPage() {
     }
   };
 
+  const subscribeBrowserPush = async () => {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setBanner({
+        tone: "warning",
+        title: "Push not supported",
+        detail: "Use Chrome/Edge on desktop or Android.",
+      });
+      return;
+    }
+    setBusy(true);
+    try {
+      const keyRes = await fetch("/api/v1/loop-engineer/notify/push/vapid-public-key", {
+        headers: authHeaders(),
+      });
+      const keyData = await keyRes.json().catch(() => ({}));
+      if (!keyRes.ok) {
+        throw new Error(
+          typeof keyData.detail === "string" ? keyData.detail : "VAPID keys not configured"
+        );
+      }
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(keyData.publicKey as string),
+      });
+      const res = await fetch("/api/v1/loop-engineer/notify/push/subscribe", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ subscription: sub.toJSON() }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(
+          typeof data.detail === "string" ? data.detail : "Subscribe failed"
+        );
+      }
+      setNotifyPush(true);
+      setBanner({
+        tone: "success",
+        title: "Browser push enabled",
+        detail: "You will get desktop notifications when packets are ready.",
+      });
+    } catch (err) {
+      setBanner(messageFromError(err, "Browser push failed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  function urlBase64ToUint8Array(base64String: string) {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const raw = window.atob(base64);
+    const arr = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+    return arr;
+  }
+
+  const batchConfirmAll = async () => {
+    const ids = packets.filter((p) => p.status === "pending_review").map((p) => p.id);
+    if (!ids.length) return;
+    setPacketBusy(true);
+    try {
+      const res = await fetch("/api/v1/loop-engineer/packets/batch-confirm", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ packet_ids: ids, start_apply: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof data.detail === "string" ? data.detail : "Batch confirm failed"
+        );
+      }
+      setBanner({
+        tone: "success",
+        title: "Batch confirmed",
+        detail: `Confirmed ${data.confirmed ?? 0} packet(s) — packages + apply sessions started.`,
+      });
+      setSelectedPacket(null);
+      await loadStatus();
+    } catch (err) {
+      setBanner(messageFromError(err, "Batch confirm failed"));
+    } finally {
+      setPacketBusy(false);
+    }
+  };
+
+  const batchRejectAll = async () => {
+    const ids = packets.filter((p) => p.status === "pending_review").map((p) => p.id);
+    if (!ids.length) return;
+    setPacketBusy(true);
+    try {
+      await fetch("/api/v1/loop-engineer/packets/batch-reject", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ packet_ids: ids }),
+      });
+      setSelectedPacket(null);
+      await loadStatus();
+    } finally {
+      setPacketBusy(false);
+    }
+  };
+
   const testNotify = async (channel: string) => {
     setBusy(true);
     try {
@@ -429,8 +547,11 @@ export default function LoopEngineerPage() {
         notify_email: notifyEmail,
         notify_telegram: notifyTelegram,
         notify_whatsapp: notifyWhatsapp,
+        notify_push: notifyPush,
         telegram_chat_id: telegramChatId,
         whatsapp_phone: whatsappPhone,
+        auto_package_on_confirm: autoPackageOnConfirm,
+        sync_portfolio_on_confirm: syncPortfolioOnConfirm,
       });
       const res = await fetch("/api/v1/loop-engineer/notify/test", {
         method: "POST",
@@ -702,6 +823,68 @@ export default function LoopEngineerPage() {
             </div>
           ) : null}
 
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={notifyPush}
+              onChange={(e) => setNotifyPush(e.target.checked)}
+              disabled={!status?.notify_channels?.push?.configured}
+            />
+            Browser push (desktop)
+            {!status?.notify_channels?.push?.configured ? (
+              <span className="text-xs text-muted-foreground">(VAPID keys)</span>
+            ) : null}
+          </label>
+          {notifyPush ? (
+            <div className="flex flex-wrap gap-2 text-sm">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void subscribeBrowserPush()}
+                className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+              >
+                Enable browser notifications
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void testNotify("push")}
+                className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+              >
+                Test push
+              </button>
+            </div>
+          ) : null}
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={autoPackageOnConfirm}
+              onChange={(e) => setAutoPackageOnConfirm(e.target.checked)}
+            />
+            Auto-generate DOCX/PDF package on confirm (v3)
+          </label>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={syncPortfolioOnConfirm}
+              onChange={(e) => setSyncPortfolioOnConfirm(e.target.checked)}
+            />
+            Update static portfolio export on confirm (v4)
+          </label>
+
+          {syncPortfolioOnConfirm ? (
+            <a
+              href="/api/v1/loop-engineer/portfolio/preview"
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-primary underline"
+            >
+              Preview portfolio export
+            </a>
+          ) : null}
+
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-sm space-y-1">
               <span className="text-muted-foreground">Target roles</span>
@@ -796,9 +979,29 @@ export default function LoopEngineerPage() {
         </div>
         <p className="text-sm text-muted-foreground">
           Each packet includes JD summary, company research, tailored resume preview, and
-          cover letter draft. Confirm only when you want Review &amp; Apply to start —
-          nothing submits without your gates in /apply.
+          cover letter draft. Confirm generates DOCX/PDF + extension apply queue (v5).
         </p>
+
+        {packets.filter((p) => p.status === "pending_review").length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={packetBusy}
+              onClick={() => void batchConfirmAll()}
+              className="rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground disabled:opacity-50"
+            >
+              Confirm all pending
+            </button>
+            <button
+              type="button"
+              disabled={packetBusy}
+              onClick={() => void batchRejectAll()}
+              className="rounded-md border px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-50"
+            >
+              Skip all pending
+            </button>
+          </div>
+        ) : null}
 
         {packets.filter((p) => p.status === "pending_review").length === 0 ? (
           <p className="text-sm text-muted-foreground border border-dashed rounded-lg p-4">

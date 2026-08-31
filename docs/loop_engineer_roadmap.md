@@ -12,9 +12,9 @@ This document is the plan for evolving Career OS into a **24/7 loop** that searc
 |---------|--------|----------------|
 | **v1** | Shipped (PR #4) | Company watchlist, scheduled scans, Pipeline approval gates, Inbox digest, Ollama/Kimi scoring |
 | **v2** | Shipped (this branch) | **Job packets** per role: JD + company research + resume/cover preview; email notify; **Confirm → Review & Apply** |
-| **v3** | Planned | Push notifications (mobile/web), Slack digest, packet batch review UI, auto-package DOCX/PDF on confirm |
-| **v4** | Planned | Portfolio sync stub (static site export from approved resume JSON) |
-| **v5** | Planned | Extension auto-fill after confirm on allowlisted ATS only (still no LinkedIn silent submit) |
+| **v3** | Shipped | Browser push, auto DOCX/PDF on confirm, batch confirm/skip |
+| **v4** | Shipped | Static portfolio HTML export on confirm |
+| **v5** | Shipped | Extension apply queue + badge + poll notifications |
 
 ---
 

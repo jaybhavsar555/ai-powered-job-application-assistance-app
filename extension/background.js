@@ -125,9 +125,73 @@ async function fetchResumeFile(applicationId) {
   }
 }
 
+async function fetchApplyQueue() {
+  const { apiBase, token } = await getConfig();
+  if (!token) return { ok: false, error: "No token" };
+  try {
+    const res = await fetch(`${apiBase}/extension/apply-queue`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { ok: false, error: text.slice(0, 120) };
+    }
+    const data = await res.json();
+    const queue = data.queue || [];
+    const count = queue.length;
+    if (chrome.action && chrome.action.setBadgeText) {
+      chrome.action.setBadgeText({ text: count > 0 ? String(count) : "" });
+      chrome.action.setBadgeBackgroundColor({ color: "#2563eb" });
+    }
+    return { ok: true, queue };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+}
+
+async function markQueueDone(applicationId) {
+  const { apiBase, token } = await getConfig();
+  if (!token || !applicationId) return { ok: false };
+  try {
+    const res = await fetch(
+      `${apiBase}/extension/apply-queue/${encodeURIComponent(applicationId)}/done`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}` } }
+    );
+    return { ok: res.ok };
+  } catch {
+    return { ok: false };
+  }
+}
+
+// Poll Loop Engineer apply queue every 5 minutes when extension is active
+chrome.alarms.create("loopApplyQueue", { periodInMinutes: 5 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "loopApplyQueue") {
+    fetchApplyQueue().then((r) => {
+      if (r.ok && r.queue && r.queue.length > 0) {
+        const top = r.queue[0];
+        chrome.notifications?.create?.(`loop-queue-${top.application_id}`, {
+          type: "basic",
+          iconUrl: "icons/icon48.png",
+          title: "Career OS — ready to apply",
+          message: `${top.title} @ ${top.company}`,
+        });
+      }
+    });
+  }
+});
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "FETCH_PROFILE") {
     fetchProfile().then(sendResponse);
+    return true;
+  }
+  if (msg?.type === "FETCH_APPLY_QUEUE") {
+    fetchApplyQueue().then(sendResponse);
+    return true;
+  }
+  if (msg?.type === "MARK_QUEUE_DONE") {
+    markQueueDone(msg.applicationId).then(sendResponse);
     return true;
   }
   if (msg?.type === "REPORT_EVENT") {

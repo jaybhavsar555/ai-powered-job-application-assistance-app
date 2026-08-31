@@ -269,9 +269,10 @@ class JobPacketService:
         packet_id: str,
         *,
         start_apply: bool = True,
-        generate_package: bool = False,
+        generate_package: Optional[bool] = None,
+        sync_portfolio: Optional[bool] = None,
     ) -> Dict[str, Any]:
-        """User approved packet → ingest job, persist research, optional apply session."""
+        """User approved packet → ingest, package, portfolio, apply queue, apply session."""
         from app.application.services.job import JobService
         from app.application.services.apply_session import ApplySessionService
         from app.schemas.job import JobCreate
@@ -282,6 +283,15 @@ class JobPacketService:
             raise HTTPException(
                 status_code=400,
                 detail=f"Packet status is {data.get('status')}, cannot confirm",
+            )
+
+        if generate_package is None:
+            generate_package = bool(
+                getattr(self.settings, "LOOP_ENGINEER_AUTO_PACKAGE_ON_CONFIRM", True)
+            )
+        if sync_portfolio is None:
+            sync_portfolio = bool(
+                getattr(self.settings, "LOOP_ENGINEER_SYNC_PORTFOLIO_ON_CONFIRM", True)
             )
 
         job = data.get("job") or {}
@@ -338,19 +348,59 @@ class JobPacketService:
             flag_modified(app, "workflow_state")
             await self.db.flush()
 
+        package_info: Dict[str, Any] = {}
         if generate_package and app:
             try:
                 from app.application.services.apply_package import ApplyPackageService
 
                 pkg = ApplyPackageService(self.db)
-                await pkg.generate_for_application(user_id, app.id)
+                package_info = await pkg.generate_for_application(user_id, app.id)
+                await self.db.refresh(app)
             except Exception as exc:
                 logger.warning("Package generation on packet confirm: %s", exc)
+                package_info = {"error": str(exc)}
 
+        portfolio_info: Dict[str, Any] = {}
+        if sync_portfolio:
+            try:
+                from app.application.services.portfolio_export import PortfolioExportService
+
+                email = await self.get_user_email(user_id)
+                portfolio_info = PortfolioExportService().export_from_packet(
+                    user_id, data, user_email=email
+                )
+            except Exception as exc:
+                logger.warning("Portfolio export on confirm: %s", exc)
+                portfolio_info = {"error": str(exc)}
+
+        apply_session_id = None
         if start_apply and app:
             apply_svc = ApplySessionService(self.db)
             session = await apply_svc.start(user_id, job_id=db_job.id)
-            data["apply_session_id"] = str(session.get("id") or "")
+            apply_session_id = str(session.get("id") or "")
+            data["apply_session_id"] = apply_session_id
+
+        # v5 — extension apply queue for autofill on job URL
+        queue_entry: Dict[str, Any] = {}
+        if app:
+            try:
+                from app.application.services.extension_apply_queue import enqueue
+
+                state = app.workflow_state or {}
+                pkg = state.get("apply_package") if isinstance(state.get("apply_package"), dict) else {}
+                files = pkg.get("files") or {}
+                queue_entry = enqueue(
+                    user_id,
+                    application_id=str(app.id),
+                    job_id=str(db_job.id),
+                    url=url,
+                    company=company or "Company",
+                    title=title,
+                    packet_id=packet_id,
+                    package_files=files,
+                )
+            except Exception as exc:
+                logger.warning("Extension queue enqueue: %s", exc)
 
         data["status"] = "confirmed"
         await self.db.commit()
@@ -358,11 +408,14 @@ class JobPacketService:
         return {
             "packet": self._summary(saved),
             "ingested_job_id": saved.get("ingested_job_id"),
-            "apply_session_id": saved.get("apply_session_id"),
+            "apply_session_id": apply_session_id,
             "apply_href": f"/apply?job_id={saved.get('ingested_job_id')}",
+            "package": package_info,
+            "portfolio": portfolio_info,
+            "extension_queue": queue_entry,
             "message": (
-                "Confirmed — Review & Apply session started. "
-                "Complete gates in /apply (extension fills; you approve Submit)."
+                "Confirmed — package generated, portfolio updated, Review & Apply started. "
+                "Open the job URL with the Chrome extension to autofill."
             ),
         }
 
@@ -375,6 +428,42 @@ class JobPacketService:
             )
         data["status"] = "rejected"
         return {"packet": self._summary(self._save(user_id, data))}
+
+    async def batch_confirm(
+        self,
+        user_id: UUID,
+        packet_ids: List[str],
+        *,
+        start_apply: bool = True,
+    ) -> Dict[str, Any]:
+        results: List[Dict[str, Any]] = []
+        errors: List[Dict[str, str]] = []
+        for pid in packet_ids or []:
+            try:
+                out = await self.confirm_packet(
+                    user_id, pid, start_apply=start_apply
+                )
+                results.append(out)
+            except HTTPException as exc:
+                errors.append({"packet_id": pid, "detail": str(exc.detail)})
+            except Exception as exc:
+                errors.append({"packet_id": pid, "detail": str(exc)})
+        return {
+            "confirmed": len(results),
+            "errors": errors,
+            "results": results,
+        }
+
+    def batch_reject(self, user_id: UUID, packet_ids: List[str]) -> Dict[str, Any]:
+        rejected = 0
+        errors: List[Dict[str, str]] = []
+        for pid in packet_ids or []:
+            try:
+                self.reject_packet(user_id, pid)
+                rejected += 1
+            except HTTPException as exc:
+                errors.append({"packet_id": pid, "detail": str(exc.detail)})
+        return {"rejected": rejected, "errors": errors}
 
     def mark_notified(self, user_id: UUID, packet_ids: List[str]) -> None:
         now = _utc_now_iso()

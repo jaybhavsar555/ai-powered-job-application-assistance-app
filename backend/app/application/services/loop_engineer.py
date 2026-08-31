@@ -84,8 +84,11 @@ class LoopEngineerService:
             "notify_email": True,
             "notify_telegram": False,
             "notify_whatsapp": False,
+            "notify_push": True,
             "telegram_chat_id": "",
             "whatsapp_phone": "",
+            "sync_portfolio_on_confirm": True,
+            "auto_package_on_confirm": True,
             "philosophy": (
                 "Loop Engineer scans on a schedule, scores with your local/cloud LLM, "
                 "then waits for your shortlist approval in Pipeline — no silent apply."
@@ -223,6 +226,12 @@ class LoopEngineerService:
             current["telegram_chat_id"] = str(patch["telegram_chat_id"] or "").strip()
         if "whatsapp_phone" in patch:
             current["whatsapp_phone"] = str(patch["whatsapp_phone"] or "").strip()
+        if "notify_push" in patch:
+            current["notify_push"] = bool(patch["notify_push"])
+        if "sync_portfolio_on_confirm" in patch:
+            current["sync_portfolio_on_confirm"] = bool(patch["sync_portfolio_on_confirm"])
+        if "auto_package_on_confirm" in patch:
+            current["auto_package_on_confirm"] = bool(patch["auto_package_on_confirm"])
         if isinstance(patch.get("preferences"), dict):
             current["preferences"] = {**current["preferences"], **patch["preferences"]}
         path = _user_schedule_path(user_id)
